@@ -40,7 +40,10 @@ Finally, you can train a model:
 from transducer import Transducer
 
 model = Transducer(settings=settings)
-model = model.fit(train_data: RawDataset=train_data, development_data: RawDataset=development_data)
+model = model.fit(
+    train_data: RawDataset=train_data,
+    development_data: RawDataset=development_data
+)
 
 predictions = model.predict(test_sources: List[List[str]])
 ```
