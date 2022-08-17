@@ -1,4 +1,4 @@
-# End-to-end Training for Hard Attention Transducers
+# End-to-End Training for Hard Attention Transducers
 
 This repository contains PyTorch-based implementations of end-to-end trainable transducers using hard attention instead of soft attention.
 There is one autoregressive and one non-autoregressive transducer.
