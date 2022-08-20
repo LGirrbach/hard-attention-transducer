@@ -5,9 +5,10 @@ from typing import List
 from copy import deepcopy
 from typing import Optional
 from collections import namedtuple
+from models.base import TransducerModel
 from torch.nn.utils.rnn import pad_sequence
 from vocabulary import SourceVocabulary, TransducerVocabulary
-from actions import Deletion, Copy, Insertion, Substitution
+from actions import Deletion, Copy, CopyShift, Insertion, Substitution, Noop
 
 
 Beam = namedtuple(
@@ -18,12 +19,16 @@ AlignmentPosition = namedtuple("AlignmentPosition", ["symbol", "actions", "predi
 TransducerPrediction = namedtuple("TransducerPrediction", ["prediction", "alignment"])
 
 
-def non_autoregressive_inference(model: nn.Module, source_vocabulary: SourceVocabulary,
+def non_autoregressive_inference(model: TransducerModel, source_vocabulary: SourceVocabulary,
                                  target_vocabulary: TransducerVocabulary, sequences: List[List[str]],
                                  feature_vocabulary: Optional[SourceVocabulary] = None,
-                                 features: Optional[List[List[str]]] = None) -> List[TransducerPrediction]:
+                                 features: Optional[List[List[str]]] = None,
+                                 max_decoding_length: int = 20) -> List[TransducerPrediction]:
     model = model.eval()
     model = model.to(model.device)
+    tau: int = model.tau
+    if tau is None:
+        tau = max_decoding_length
 
     # Index sources
     sequences = [
@@ -48,40 +53,51 @@ def non_autoregressive_inference(model: nn.Module, source_vocabulary: SourceVoca
     # Get predictions
     with torch.no_grad():
         scores = model(
-            sources=sources, lengths=source_lengths, features=features, feature_lengths=feature_lengths
+            sources=sources, lengths=source_lengths, features=features, feature_lengths=feature_lengths,
+            tau=max_decoding_length
         )
         scores = scores.reshape(len(sequences), -1, len(target_vocabulary))
-        predictions = scores.argmax(dim=-1).detach().cpu().tolist()
+        predictions = scores.argmax(dim=-1).detach().cpu()
 
     # Decode predictions
     hypotheses = []
 
     for sequence, predicted_action_idx in zip(sequences, predictions):
         # Select only relevant predictions
-        predicted_action_idx = predicted_action_idx[:model.tau * len(sequence)]
+        predicted_action_idx = predicted_action_idx[:tau * len(sequence)]
+        predicted_action_idx = predicted_action_idx.reshape(-1, tau)
+        predicted_action_idx = predicted_action_idx.tolist()
 
-        action_history = [{"symbol": symbol, "actions": [], "predictions": []} for symbol in sequence]
+        action_history = []
         sequence_prediction = []
 
-        for i, action_idx in enumerate(predicted_action_idx):
-            symbol_index = i // model.tau
-            symbol = sequence[symbol_index]
+        for symbol, predicted_actions in zip(sequence, predicted_action_idx):
+            current_actions = []
+            current_predictions = []
 
-            action = target_vocabulary[action_idx]
-            action_history[symbol_index]["actions"].append(action)
+            for action_idx in predicted_actions:
+                action = target_vocabulary[action_idx]
+                current_actions.append(action)
 
-            if isinstance(action, Insertion) or isinstance(action, Substitution):
-                sampled_token = action.token
-                sequence_prediction.append(sampled_token)
-                action_history[symbol_index]["predictions"].append(sampled_token)
+                if isinstance(action, Insertion):
+                    current_predictions.append(action.token)
 
-            elif isinstance(action, Copy):
-                sampled_token = symbol
-                sequence_prediction.append(sampled_token)
-                action_history[symbol_index]["predictions"].append(sampled_token)
+                elif isinstance(action, Substitution):
+                    current_predictions.append(action.token)
+                    break
 
-            else:
-                continue
+                elif isinstance(action, Copy):
+                    current_predictions.append(symbol)
+
+                elif isinstance(action, CopyShift):
+                    current_predictions.append(symbol)
+                    break
+
+                elif isinstance(action, Deletion):
+                    break
+
+            action_history.append({"symbol": symbol, "actions": current_actions, "predictions": current_predictions})
+            sequence_prediction.extend(current_predictions)
 
         hypotheses.append((sequence_prediction, action_history))
 
@@ -194,6 +210,13 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
                     sampled_hidden.append((new_hidden[0][:, sentence_idx], new_hidden[1][:, sentence_idx]))
                     action_histories[sentence_idx][position]["actions"].append(predicted_action)
                     action_histories[sentence_idx][position]["predictions"].append(sampled_token)
+
+                elif isinstance(predicted_action, CopyShift):
+                    sampled_token = sequences[sentence_idx][position]
+                    hypotheses[sentence_idx].append(sampled_token)
+                    sampled_hidden.append((new_hidden[0][:, sentence_idx], new_hidden[1][:, sentence_idx]))
+                    action_histories[sentence_idx][position]["actions"].append(predicted_action)
+                    action_histories[sentence_idx][position]["predictions"].append(sampled_token)
                     positions[sentence_idx] += 1
 
                 elif isinstance(predicted_action, Deletion):
@@ -216,8 +239,13 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
                     action_histories[sentence_idx][position]["actions"].append(predicted_action)
                     action_histories[sentence_idx][position]["predictions"].append(sampled_token)
 
+                elif isinstance(predicted_action, Noop):
+                    sampled_hidden.append((old_hidden[0][:, sentence_idx], old_hidden[1][:, sentence_idx]))
+                    action_histories[sentence_idx][position]["actions"].append(predicted_action)
+                    positions[sentence_idx] += 1
+
                 else:
-                    raise RuntimeError()
+                    raise RuntimeError(f"Sampled invalid action: {predicted_action}")
 
         h_0, c_0 = zip(*sampled_hidden)
         h_0, c_0 = torch.stack(h_0), torch.stack(c_0)
@@ -324,6 +352,9 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
             if insertion_index <= num_beams:
                 self.hypotheses[s_index].insert(insertion_index, (bm.score, bm))
 
+        def get_best_score(self, s_index: int) -> float:
+            return self.hypotheses[s_index][0].score
+
     hypotheses = Hypotheses()
 
     while len(get_all_beams()) > 0 and step_num < max_decoding_length:
@@ -406,12 +437,17 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
 
                 if (
                         isinstance(predicted_action, Copy) or
+                        isinstance(predicted_action, CopyShift) or
                         isinstance(predicted_action, Substitution) or
                         isinstance(predicted_action, Insertion)
                 ):
-                    if isinstance(predicted_action, Copy):
+                    if isinstance(predicted_action, CopyShift):
                         sampled_symbol = sequences[beam.source_index][beam.position]
                         position_update = 1
+
+                    elif isinstance(predicted_action, Copy):
+                        sampled_symbol = sequences[beam.source_index][beam.position]
+                        position_update = 0
 
                     elif isinstance(predicted_action, Substitution):
                         sampled_symbol = predicted_action.token
@@ -442,7 +478,7 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
                         score=beam.score + score
                     )
 
-                elif predicted_action.is_deletion():
+                elif predicted_action.is_deletion() or predicted_action.is_noop():
                     hidden = (old_hidden[0][:, idx], old_hidden[1][:, idx])
 
                     new_beam = Beam(
@@ -459,8 +495,10 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
 
                 if is_finished(new_beam):
                     hypotheses.add(bm=new_beam, s_index=new_beam.source_index)
-                else:
+                elif new_beam.score >= hypotheses.get_best_score(s_index=new_beam.source_index):
                     new_beams[beam.source_index].append(new_beam)
+                    branch_counter += 1
+                else:
                     branch_counter += 1
 
                 score_rank += 1

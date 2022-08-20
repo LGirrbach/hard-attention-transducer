@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from typing import List
-from actions import Copy, Deletion, Substitution, Insertion, Action, Noop
+from actions import Copy, CopyShift, Deletion, Substitution, Insertion, Action, Noop
+
+COPY = Copy()
+COPY_SHIFT = CopyShift()
+DELETION = Deletion()
+NOOP = Noop()
+FIXED_ACTIONS = [COPY, COPY_SHIFT, DELETION, NOOP]
 
 
 class SourceVocabulary:
@@ -68,7 +74,7 @@ class TransducerVocabulary:
 
     @staticmethod
     def get_special_actions() -> List[Action]:
-        return [Deletion(), Copy(), Noop()]
+        return FIXED_ACTIONS
 
     def __len__(self) -> int:
         return len(self.actions)
@@ -83,13 +89,16 @@ class TransducerVocabulary:
         return self.substitution2idx.get(symbol, len(self.insertions) + 1)
 
     def get_deletion_index(self) -> int:
-        return len(self.actions) - 3
+        return len(self.actions) - len(FIXED_ACTIONS) + FIXED_ACTIONS.index(DELETION)
 
     def get_copy_index(self) -> int:
-        return len(self.actions) - 2
+        return len(self.actions) - len(FIXED_ACTIONS) + FIXED_ACTIONS.index(COPY)
+
+    def get_copy_shift_index(self) -> int:
+        return len(self.actions) - len(FIXED_ACTIONS) + FIXED_ACTIONS.index(COPY_SHIFT)
 
     def get_noop_index(self) -> int:
-        return len(self.actions) - 1
+        return len(self.actions) - len(FIXED_ACTIONS) + FIXED_ACTIONS.index(NOOP)
 
     def get_symbol_index(self, symbol: str) -> int:
         return self.symbol2idx.get(symbol, self.symbol2idx[self.UNK_TOKEN])

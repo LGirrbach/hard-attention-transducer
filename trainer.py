@@ -227,7 +227,8 @@ def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, devel
                 )
                 batch_predictions = non_autoregressive_inference(
                     model=model, source_vocabulary=source_vocabulary, target_vocabulary=target_vocabulary,
-                    sequences=batch_sources, features=batch_features, feature_vocabulary=feature_vocabulary
+                    sequences=batch_sources, features=batch_features, feature_vocabulary=feature_vocabulary,
+                    max_decoding_length=max_decoding_length
                 )
 
             batch_losses = batch_losses.detach().cpu().tolist()
@@ -275,8 +276,9 @@ def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch
     loss = autoregressive_transduction_loss(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
-        copy_index=batch.copy_index, deletion_index=batch.deletion_index, copy_matrix=batch.copy_matrix,
-        device=device, allow_copy=allow_copy, enforce_copy=enforce_copy, reduction=reduction
+        copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index, deletion_index=batch.deletion_index,
+        copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy,
+        reduction=reduction
     )
 
     return loss
@@ -284,21 +286,26 @@ def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch
 
 def _get_non_autoregressive_loss(model: nn.Module, batch: Batch, device: torch.device, allow_copy: bool,
                                  enforce_copy: bool, noop_discount: float, reduction: str) -> torch.Tensor:
+    tau = model.tau
+    if tau is None:
+        tau = batch.target_lengths.max().detach().cpu().item()
+
     if model.use_features:
         scores = model(
             sources=batch.sources, lengths=batch.source_lengths, features=batch.features,
-            feature_lengths=batch.feature_lengths
+            feature_lengths=batch.feature_lengths, tau=tau
         )
     else:
         scores = model(
-            sources=batch.sources, lengths=batch.source_lengths, features=None, feature_lengths=None
+            sources=batch.sources, lengths=batch.source_lengths, features=None, feature_lengths=None, tau=tau
         )
 
     loss = non_autoregressive_transduction_loss(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
-        copy_index=batch.copy_index, deletion_index=batch.deletion_index, noop_index=batch.noop_index,
-        copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy, tau=model.tau,
+        copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index,
+        deletion_index=batch.deletion_index, noop_index=batch.noop_index,
+        copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy, tau=tau,
         noop_discount=noop_discount, reduction=reduction
     )
 

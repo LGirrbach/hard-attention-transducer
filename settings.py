@@ -32,6 +32,8 @@ setting_fields = [
     "dropout",  # Dropout probability
     "autoregressive",  # Whether to use autoregressive or non-autoregressive transducer
     "tau",  # Branching factor for non-autoregressive model
+    "non_autoregressive_decoder",  # Whether to use fixed / position / lstm decoder for non-autoregressive model
+    "max_targets_per_symbol",  # Maximum number of target symbol decoded from a single input symbol
     "scorer",  # Normalisation function for raw probability scores
     "temperature",  # Scaling factor for raw prediction scores
     "features_num_layers",  # Number of hidden layers in feature encoder
@@ -101,6 +103,14 @@ def make_argument_parser():
     parser.add_argument("--non-autoregressive", action="store_true", help="Enable non autoregressive model")
     parser.add_argument("--tau", type=int, default=5, help="\\tau parameter for non-autoregressive model")
     parser.add_argument(
+        "--non-autoregressive-decoder", type=str, default="position", choices=["fixed", "position", "lstm"],
+        help="Type of decoder in non-autoregressive model"
+    )
+    parser.add_argument(
+        "--max-targets-per-symbol", type=int, default=50,
+        help="Max. target symbols that can be generated from 1 input symbol"
+    )
+    parser.add_argument(
         "--scorer", action='store', default="softmax", choices=["softmax", "entmax", "sparsemax"],
         help="Probability normalisation function"
     )
@@ -165,7 +175,8 @@ def get_settings_from_arguments() -> Settings:
         keep_only_best_checkpoint=args.keep_only_best_checkpoint, use_features=args.use_features,
         optimizer=args.optimizer, lr=args.lr, weight_decay=args.weight_decay, grad_clip=args.grad_clip, model="lstm",
         embedding_size=args.embedding, hidden_size=args.hidden, hidden_layers=args.layers, dropout=args.dropout,
-        autoregressive=autoregressive, tau=args.tau, scorer=args.scorer, temperature=args.temperature,
+        autoregressive=autoregressive, tau=args.tau, non_autoregressive_decoder=args.non_autoregressive_decoder,
+        max_targets_per_symbol=args.max_targets_per_symbol, scorer=args.scorer, temperature=args.temperature,
         features_num_layers=args.features_num_layers, features_pooling=args.features_pooling,
         noop_discount=args.noop_discount, allow_copy=allow_copy, enforce_copy=args.enforce_copy, name=args.name,
         train_data_path=args.train_data, dev_data_path=args.dev_data, save_path=args.save_path,
@@ -181,7 +192,8 @@ def make_settings(
         scheduler: str = "exponential", gamma: float = 1.0, verbose: bool = True, report_progress_every: int = 10,
         main_metric: str = "loss", keep_only_best_checkpoint: bool = True, optimizer: str = "sgd", lr: float = 0.001,
         weight_decay: float = 0.0, grad_clip: Optional[float] = None, model: str = "lstm", embedding_size: int = 128,
-        hidden_size: int = 128, hidden_layers: int = 1, dropout: float = 0.0, tau: int = 5, scorer: str = "softmax",
+        hidden_size: int = 128, hidden_layers: int = 1, dropout: float = 0.0, tau: int = 5,
+        non_autoregressive_decoder: str = "position", max_targets_per_symbol: int = 50, scorer: str = "softmax",
         temperature: float = 1.0, features_num_layers: int = 0, features_pooling: str = "mean",
         noop_discount: float = 1.0, allow_copy: bool = True, enforce_copy: bool = False,
         train_data_path: Optional[str] = None, dev_data_path: Optional[str] = None, beam_search: bool = True,
@@ -192,7 +204,8 @@ def make_settings(
         keep_only_best_checkpoint=keep_only_best_checkpoint, use_features=use_features,
         optimizer=optimizer, lr=lr, weight_decay=weight_decay, grad_clip=grad_clip, model=model,
         embedding_size=embedding_size, hidden_size=hidden_size, hidden_layers=hidden_layers, dropout=dropout,
-        autoregressive=autoregressive, tau=tau, scorer=scorer, temperature=temperature,
+        autoregressive=autoregressive, tau=tau, non_autoregressive_decoder=non_autoregressive_decoder,
+        max_targets_per_symbol=max_targets_per_symbol, scorer=scorer, temperature=temperature,
         features_num_layers=features_num_layers, features_pooling=features_pooling,
         noop_discount=noop_discount, allow_copy=allow_copy, enforce_copy=enforce_copy, name=name,
         train_data_path=train_data_path, dev_data_path=dev_data_path, save_path=save_path,

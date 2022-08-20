@@ -7,6 +7,10 @@ class Action(ABC):
         return False
 
     @staticmethod
+    def is_copy_shift():
+        return False
+
+    @staticmethod
     def is_deletion():
         return False
 
@@ -32,6 +36,12 @@ class Noop(Action):
 class Copy(Action):
     @staticmethod
     def is_copy():
+        return True
+
+
+class CopyShift(Action):
+    @staticmethod
+    def is_copy_shift():
         return True
 
 

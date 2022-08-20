@@ -33,7 +33,7 @@ def _sum_over_time_pooling(sequences: Tensor, lengths: Tensor) -> Tensor:
 
 def _mean_over_time_pooling(sequences: Tensor, lengths: Tensor) -> Tensor:
     sum_pooled = _sum_over_time_pooling(sequences, lengths)
-    length_normaliser = lengths.float().reshape(len(lengths), 1).expand(sum_pooled.shape)
+    length_normaliser = lengths.float().reshape(len(lengths), 1).expand(sum_pooled.shape).to(sum_pooled.device)
     pooled = sum_pooled / length_normaliser
 
     return pooled

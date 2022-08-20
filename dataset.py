@@ -14,8 +14,8 @@ Batch = namedtuple(
     "Batch",
     [
         "sources", "targets", "insertion_labels", "substitution_labels", "copy_matrix", "source_lengths",
-        "target_lengths", "copy_index", "deletion_index", "noop_index", "raw_sources", "raw_targets",
-        "features", "feature_lengths", "raw_features"
+        "target_lengths", "copy_index", "copy_shift_index", "deletion_index", "noop_index", "raw_sources",
+        "raw_targets", "features", "feature_lengths", "raw_features"
     ]
 )
 
@@ -47,6 +47,7 @@ class TransducerDatasetTrain(Dataset, ABC):
         self.feature_vocabulary = feature_vocabulary
 
         self.target_copy_index = self.target_vocabulary.get_copy_index()
+        self.target_copy_shift_index = self.target_vocabulary.get_copy_shift_index()
         self.target_deletion_index = self.target_vocabulary.get_deletion_index()
         self.target_noop_index = self.target_vocabulary.get_noop_index()
 
@@ -136,10 +137,9 @@ class TransducerDatasetTrain(Dataset, ABC):
         return Batch(
             sources=indexed_sources, targets=indexed_targets, insertion_labels=insertion_labels,
             substitution_labels=substitution_labels, copy_matrix=batch_copy_matrix, source_lengths=source_lengths,
-            target_lengths=target_lengths, copy_index=self.target_copy_index,
-            deletion_index=self.target_deletion_index, noop_index=self.target_noop_index,
-            raw_sources=sources, raw_targets=targets, features=indexed_features, feature_lengths=feature_lengths,
-            raw_features=features
+            target_lengths=target_lengths, copy_index=self.target_copy_index, deletion_index=self.target_deletion_index,
+            copy_shift_index=self.target_copy_shift_index, noop_index=self.target_noop_index, raw_sources=sources,
+            raw_targets=targets, features=indexed_features, feature_lengths=feature_lengths, raw_features=features
         )
 
 
