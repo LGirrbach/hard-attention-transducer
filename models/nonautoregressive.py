@@ -48,7 +48,7 @@ class NonAutoregressiveLSTMDecoder(nn.Module):
         )
 
         decoder_outputs, _ = self.decoder(decoder_inputs.contiguous(), hidden)
-        decoder_outputs = decoder_outputs.reshape(batch, timesteps * tau, self.hidden_size)
+        decoder_outputs = decoder_outputs.reshape(batch, timesteps, tau, self.hidden_size)
         decoder_outputs = self.classifier(decoder_outputs)
 
         return decoder_outputs
@@ -104,7 +104,7 @@ class NonAutoregressiveFixedTauDecoder(nn.Module):
         self.dropout = dropout
         self.tau = tau
 
-        self.decoder = nn.Sequential(
+        self.classifier = nn.Sequential(
             nn.Dropout(p=dropout),
             nn.Linear(input_size, 2 * hidden_size),
             nn.GELU(),

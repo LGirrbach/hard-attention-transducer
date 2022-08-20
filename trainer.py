@@ -90,7 +90,8 @@ def _build_model(source_vocab_size: int, target_vocab_size: int, settings: Setti
                 tau=settings.tau, scorer=settings.scorer, temperature=settings.temperature,
                 use_features=settings.use_features, feature_vocab_size=feature_vocab_size,
                 feature_encoder_layers=settings.features_num_layers, feature_encoder_hidden=settings.hidden_size,
-                feature_encoder_pooling=settings.features_pooling
+                feature_encoder_pooling=settings.features_pooling, decoder_type=settings.non_autoregressive_decoder,
+                max_targets_per_symbol=settings.max_targets_per_symbol
             )
 
     else:
