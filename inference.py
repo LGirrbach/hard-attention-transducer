@@ -355,7 +355,7 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
         def get_best_score(self, s_index: int) -> float:
             if len(self.hypotheses[s_index]) == 0:
                 return -torch.inf
-            return self.hypotheses[s_index][0].score
+            return self.hypotheses[s_index][0][0]
 
     hypotheses = Hypotheses()
 
