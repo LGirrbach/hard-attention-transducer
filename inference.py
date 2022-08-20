@@ -124,8 +124,7 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
 
     # Index sources
     sequences = [
-        [source_vocabulary.SOS_TOKEN] + source +
-        [source_vocabulary.EOS_TOKEN, source_vocabulary.EOS_TOKEN] for source in sequences
+        [source_vocabulary.SOS_TOKEN] + source + [source_vocabulary.EOS_TOKEN] for source in sequences
     ]
     source_lengths = torch.tensor([len(source) for source in sequences]).long()
     sources = [torch.tensor(source_vocabulary.index_sequence(source)).long() for source in sequences]
@@ -147,7 +146,7 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
     with torch.no_grad():
         source_encodings = model.encode(sources, source_lengths)
 
-    hypotheses = [[] for _ in sequences]  # Store generated predictions
+    hypotheses = [[target_vocabulary.SOS_TOKEN] for _ in sequences]  # Store generated predictions
     action_histories = [
         [{"symbol": symbol, "actions": [], "predictions": []} for symbol in sequence] for sequence in sequences
     ]
@@ -256,8 +255,6 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
         ]
         sampled_tokens = torch.tensor(sampled_tokens).long()
 
-    action_histories = [history[:-1] for history in action_histories]
-
     # Reformat predictions
     predictions = []
     for prediction, alignment in zip(hypotheses, action_histories):
@@ -266,7 +263,7 @@ def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVo
                 symbol=position["symbol"], actions=position["actions"], predictions=position["predictions"]
             ) for position in alignment
         ]
-        predictions.append(TransducerPrediction(prediction=prediction, alignment=alignment))
+        predictions.append(TransducerPrediction(prediction=prediction[1:], alignment=alignment))
 
     return predictions
 
@@ -281,8 +278,7 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
 
     # Index sources
     sequences = [
-        [source_vocabulary.SOS_TOKEN] + source +
-        [source_vocabulary.EOS_TOKEN, source_vocabulary.EOS_TOKEN] for source in sequences
+        [source_vocabulary.SOS_TOKEN] + source + [source_vocabulary.EOS_TOKEN] for source in sequences
     ]
     source_lengths = torch.tensor([len(source) for source in sequences]).long()
     sources = [torch.tensor(source_vocabulary.index_sequence(source)).long() for source in sequences]
@@ -483,19 +479,23 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
                 elif predicted_action.is_deletion() or predicted_action.is_noop():
                     hidden = (old_hidden[0][:, idx], old_hidden[1][:, idx])
 
+                    # Make updated alignment history
+                    alignment = deepcopy(beam.alignments)
+                    alignment[beam.position]["actions"].append(predicted_action)
+
                     new_beam = Beam(
                         source_index=beam.source_index,
                         position=beam.position + 1,
                         hidden=hidden,
                         predictions=deepcopy(beam.predictions),
-                        alignments=deepcopy(beam.alignments),
+                        alignments=alignment,
                         score=beam.score + score
                     )
 
                 else:
                     raise RuntimeError(f"Illegal action sampled: {predicted_action}")
 
-                if is_finished(new_beam):
+                if is_finished(new_beam) or step_num >= max_decoding_length:
                     hypotheses.add(bm=new_beam, s_index=new_beam.source_index)
                 elif new_beam.score >= hypotheses.get_best_score(s_index=new_beam.source_index):
                     new_beams[beam.source_index].append(new_beam)
@@ -514,13 +514,13 @@ def autoregressive_beam_search_sampling(model: nn.Module, source_vocabulary: Sou
     for source_predictions in hypotheses.hypotheses:
         _, best_hypothesis = max(source_predictions, key=lambda hypothesis: hypothesis[0])
 
-        prediction = best_hypothesis.predictions[1:]
+        prediction = best_hypothesis.predictions
         alignment = [
             AlignmentPosition(
                 symbol=position["symbol"], predictions=position["predictions"], actions=position["actions"]
             )
-            for position in best_hypothesis.alignments[:-1]
+            for position in best_hypothesis.alignments
         ]
-        predictions.append(TransducerPrediction(prediction=prediction, alignment=alignment))
+        predictions.append(TransducerPrediction(prediction=prediction[1:], alignment=alignment))
 
     return predictions

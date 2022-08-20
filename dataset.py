@@ -145,8 +145,7 @@ class TransducerDatasetTrain(Dataset, ABC):
 
 class AutoregressiveTransducerDatasetTrain(TransducerDatasetTrain):
     def _add_special_tokens_source(self, sequence: List[str]) -> List[str]:
-        sequence = [self.source_vocabulary.SOS_TOKEN] + sequence
-        sequence = sequence + [self.source_vocabulary.EOS_TOKEN, self.source_vocabulary.EOS_TOKEN]
+        sequence = [self.source_vocabulary.SOS_TOKEN] + sequence + [self.source_vocabulary.EOS_TOKEN]
         return sequence
 
     def _add_special_tokens_target(self, sequence: List[str]) -> List[str]:

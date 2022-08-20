@@ -23,27 +23,34 @@ def autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, tar
     assert not (enforce_copy and not allow_copy), "Cannot both enforce copy and disable copying"
     # scores: batch x source length x target length x #labels
 
+    # Define constants
+    batch_size, source_length, target_length, num_labels = scores.shape
+    neg_inf_value = -1e6
+
     probability_matrix = [
-        [torch.zeros(scores.shape[0], device=device) for _ in range(scores.shape[2])] for _ in range(scores.shape[1])
+        [torch.full(size=(batch_size,), fill_value=neg_inf_value, device=device) for _ in range(target_length)]
+        for _ in range(source_length + 1)
     ]
-    batch_indices = torch.arange(0, scores.shape[0])
+
+    batch_indices = torch.arange(0, batch_size)
     copy_matrix = copy_matrix.to(device)
 
-    for source_index in range(0, scores.shape[1]):
-        for target_index in range(0, scores.shape[2]):
+    for source_index in range(0, source_length + 1):
+        for target_index in range(0, target_length):
             if source_index == 0 and target_index == 0:
+                probability_matrix[source_index][target_index] = torch.zeros(batch_size, device=device)
                 continue
 
             probabilities = []
 
             # Calculate deletion scores
             if source_index > 0:
-                deletion_scores = probability_matrix[source_index-1][target_index]
-                deletion_scores = deletion_scores + scores[:, source_index-1, target_index, deletion_index]
+                deletion_scores = probability_matrix[source_index - 1][target_index]
+                deletion_scores = deletion_scores + scores[:, source_index - 1, target_index, deletion_index]
                 probabilities.append(deletion_scores)
 
             # Calculate insertion scores
-            if target_index > 0:
+            if target_index > 0 and source_index < source_length:
                 insertion_scores = probability_matrix[source_index][target_index - 1]
                 insertion_prediction_scores =\
                     scores[batch_indices, source_index, target_index - 1, insertion_labels[:, target_index]]
@@ -58,28 +65,30 @@ def autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, tar
                 substitution_scores = substitution_scores + substitution_prediction_scores
 
                 if enforce_copy:
-                    can_copy_mask = copy_matrix[:, source_index-1, target_index-1]
-                    substitution_scores = torch.masked_fill(substitution_scores, mask=can_copy_mask, value=-100)
+                    can_copy_mask = copy_matrix[:, source_index - 1, target_index - 1]
+                    substitution_scores = torch.masked_fill(
+                        substitution_scores, mask=can_copy_mask, value=neg_inf_value
+                    )
 
                 probabilities.append(substitution_scores)
 
             # Calculate copy scores
-            if allow_copy and target_index > 0:
+            if allow_copy and target_index > 0 and source_index < source_length:
                 copy_scores = probability_matrix[source_index][target_index - 1]
                 copy_scores = copy_scores + scores[:, source_index, target_index-1, copy_index]
 
                 copy_mask = torch.logical_not(copy_matrix[:, source_index, target_index-1])
-                copy_scores = torch.masked_fill(copy_scores, mask=copy_mask, value=-100)
+                copy_scores = torch.masked_fill(copy_scores, mask=copy_mask, value=neg_inf_value)
 
                 probabilities.append(copy_scores)
 
             # Calculate copy shift scores
             if allow_copy and source_index > 0 and target_index > 0:
-                copy_scores = probability_matrix[source_index][target_index - 1]
-                copy_scores = copy_scores + scores[:, source_index, target_index - 1, copy_shift_index]
+                copy_scores = probability_matrix[source_index - 1][target_index - 1]
+                copy_scores = copy_scores + scores[:, source_index - 1, target_index - 1, copy_shift_index]
 
-                copy_mask = torch.logical_not(copy_matrix[:, source_index, target_index - 1])
-                copy_scores = torch.masked_fill(copy_scores, mask=copy_mask, value=-100)
+                copy_mask = torch.logical_not(copy_matrix[:, source_index - 1, target_index - 1])
+                copy_scores = torch.masked_fill(copy_scores, mask=copy_mask, value=neg_inf_value)
 
                 probabilities.append(copy_scores)
 
@@ -90,7 +99,7 @@ def autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, tar
     probability_matrix = torch.stack([torch.stack(row) for row in probability_matrix])
     probability_matrix = torch.permute(probability_matrix, dims=(2, 0, 1))
 
-    nll = -probability_matrix[batch_indices, source_lengths - 1, :][batch_indices, target_lengths - 1]
+    nll = -probability_matrix[batch_indices, source_lengths, :][batch_indices, target_lengths - 1]
     loss = _loss_reduction(nll, reduction=reduction)
 
     return loss
