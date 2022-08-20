@@ -146,7 +146,6 @@ def non_autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor,
             previous_scores = probability_matrix[source_index - 1][:, :-1]  # shape batch x target_max_timesteps
 
             # Get insertion scores
-            # current_insertion_labels = insertion_labels[:, target_index - 1]
             # insertion labels shape: batch x target_max_timesteps
             insertion_prediction_scores = expanded_scores[:, source_index - 1, :]
             insertion_prediction_scores = insertion_prediction_scores.unsqueeze(1)

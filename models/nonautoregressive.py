@@ -78,6 +78,9 @@ class NonAutoregressivePositionalDecoder(nn.Module):
         )
 
     def forward(self, encoder_outputs: Tensor, tau: int) -> Tensor:
+        if tau > self.max_decoding_length:
+            raise ValueError(f"Given tau ({tau}) is greater than max. decoding length ({self.max_decoding_length})")
+
         # Make input sequence
         batch, timesteps, num_features = encoder_outputs.shape
 
