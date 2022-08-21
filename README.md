@@ -203,7 +203,7 @@ source symbols.
 
 ## References
  * Monotonic Hard Attention Transducers: [Makarov and Clematide (2018a)](https://aclanthology.org/C18-1008),
-   [Makariv and Clematide (2018b)](https://aclanthology.org/D18-1314),
+   [Makarov and Clematide (2018b)](https://aclanthology.org/D18-1314),
    [Clematide and Makarov (2021)](https://aclanthology.org/2021.sigmorphon-1.17),
    [Wehrli et al. (2022)](https://aclanthology.org/2022.sigmorphon-1.21)
  * End-to-End Training for Hard Attention: [Yu et al. (2016)](https://aclanthology.org/D16-1138),
