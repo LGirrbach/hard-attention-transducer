@@ -128,24 +128,11 @@ CopyShift actions, and can shift the hard attention within the predictions from 
 or Copy actions. Therefore, we calculate the probability of predicting target sequence prefix
 $t_{1:n}$ from source sequence prefix $s_{1:m}$ and symbol prediction index $1 \leq q \leq \tau$ recursively by
 
-$$
-\begin{align}
-P(t_{1:n}|s_{1:m}, q) =
-\sum_{1\leq r \leq \tau} \left(\quad &P_{\text{del}}(s_m) \cdot P(t_{1:n}|s_{1:m-1}, r) \right. \\
-&+ P_{\text{copy-shift}}(s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r) \cdot \delta_{t_n = s_m} \\
-&+ P_{\text{sub}}(t_n|s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r) \\
-&\left. \right)
-\end{align}
-$$
+$$P(t_{1:n}|s_{1:m}, q) = \sum_{1\leq r \leq \tau} \quad \left(P_{\text{del}}(s_m) \cdot P_(t_{1:n}|s_{1:m-1}, r) + P_{\text{copy-shift}}(s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r) \cdot \delta_{t_n = s_m} + P_{\text{sub}}(t_n|s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r)\right)$$
 
 if $q = 1$ and
 
-$$
-\begin{equation}
-P(t_{1:n}|s_{1:m}, q) =
-P_{\text{copy}}(s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \cdot \delta_{t_n = s_m}
-+ P_{\text{ins}}(t_n|s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1)
-\end{align}
+$$P(t_{1:n}|s_{1:m}, q) = P_{\text{copy}}(s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \cdot \delta_{t_n = s_m} + P_{\text{ins}}(t_n|s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1)
 $$
 
 if $q > 1$.
