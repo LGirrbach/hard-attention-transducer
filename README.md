@@ -86,14 +86,17 @@ At training time, the ground-truth target sequence is known, and so we can use t
 Furthermore, we marginalise over possible alignments of source symbols to target symbols and possible edit operations.
 Using dynamic programming, we calculate the probability of predicting target sequence prefix
 $t_{1:n}$ from source sequence prefix $s_{1:m}$ recursively by
+
 $$
-P(t_{1:n}|s_{1:m}) =
-P_{\text{del}}(s_m) \cdot P(t_{1:n}|s_{1:m-1}) +
-\delta_{t_n = s_m} \cdot P_{\text{copy-shift}}(s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) + 
-P_{\text{sub}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) +
-\delta_{t_n = s_m} \cdot P_{\text{copy}}(s_m) \cdot P(t_{1:n-1}|s_{1:m}) +
-P_{\text{ins}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m})
+\begin{align}
+P(t_{1:n}|s_{1:m}) = \quad &P_{\text{del}}(s_m) \cdot P(t_{1:n}|s_{1:m-1}) \\
+&+ P_{\text{copy-shift}}(s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) \cdot \delta_{t_n = s_m} \\
+&+ P_{\text{sub}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) \\
+&+ P_{\text{copy}}(s_m) \cdot P(t_{1:n-1}|s_{1:m}) \cdot \delta_{t_n = s_m} \\
+&+ P_{\text{ins}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m})
+\end{align}
 $$
+
 where $P_{\text{del}}, P_{\text{copy-shift}}, P_{\text{sub}}, P_{\text{copy}}, P_{\text{ins}}$ are the probabilities
 for Delete, CopyShift, Substitution, Copy, and Insertion. $\delta_{t_n = s_m}$ is the indicator function stating
 whether copying is possible (target symbol equals source symbol).
