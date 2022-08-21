@@ -101,7 +101,68 @@ where $P_{\text{del}}, P_{\text{copy-shift}}, P_{\text{sub}}, P_{\text{copy}}, P
 for Delete, CopyShift, Substitution, Copy, and Insertion. $\delta_{t_n = s_m}$ is the indicator function stating
 whether copying is possible (target symbol equals source symbol).
 
+To use the autoregressive model, set the `autoregressive` parameter in `make_settings` to `True`.
+
 ### Non-Autoregressive Decoder
+The non-autoregressive decoder is based on an idea proposed by
+[Libovický and Helcl (2018)](https://aclanthology.org/D18-1336): From each source symbol, predict $\tau$ edit actions.
+In the original formulation, $\tau$ is a fixed parameter. While this is sufficient for many problems like
+grapheme-to-phoneme conversion, it may not be sufficient for problems where source symbols generate long target
+sequences, which may be the case for inflections in some agglutinative languages.
+Therefore, this implementation offers predicting a flexible number of edit actions from each source symbol
+using a LSTM, or concatenation of the symbol encoding to learned positional embeddings.
+
+The main difference to simply removing the dependence on the last predicted target symbol from the autoregressive
+decoder LSTM is that the non-autoregressive version allows to decode from all source symbols in parallel, while the
+mentioned alternative would still be autoregressive in the sense that it needs the previously predicted edit action to
+decide whether to shift hard attention or stay with the current symbol.
+
+In case of a flexible $\tau$, at training time $\tau$ is set to the longest target sequence in the batch. At test time,
+we can use some upper bound derived from either the training data or the test source sequences. Also, using learned
+positional embeddings instead of LSTM for decoding requires setting a maximum number of edit operations that can be
+predicted from a single source symbol. This is the parameter `max_targets_per_symbol` in `make_settings`.
+
+Training stays the same as in the autoregressive case, except that the hard attention alignment process becomes
+hierarchical: We can shift hard attention from one source symbol to the next by predicting Delete, Substitution, or
+CopyShift actions, and can shift the hard attention within the predictions from one source symbol predicting Insertion
+or Copy actions. Therefore, we calculate the probability of predicting target sequence prefix
+$t_{1:n}$ from source sequence prefix $s_{1:m}$ and symbol prediction index $1 \leq q \leq \tau$ recursively by
+
+$$
+\begin{align}
+P(t_{1:n}|s_{1:m}, q) =
+\sum_{1\leq r \leq \tau} \left(\quad &P_{\text{del}}(s_m) \cdot P(t_{1:n}|s_{1:m-1}, r) \right. \\
+&+ P_{\text{copy-shift}}(s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r) \cdot \delta_{t_n = s_m} \\
+&+ P_{\text{sub}}(t_n|s_m, r) \cdot P(t_{1:n-1}|s_{1:m-1}, r) \\
+&\left. \right)
+\end{align}
+$$
+
+if $q = 1$ and
+
+$$
+\begin{align}
+P(t_{1:n}|s_{1:m}, q) = 
+\quad &P_{\text{copy}}(s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \cdot \delta_{t_n = s_m} \\
+&+ P_{\text{ins}}(t_n|s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \\
+&\left. \right)
+\end{align}
+$$
+
+if $q > 1$.
+
+To use the non-autoregressive model, set `autoregressive` in `make_settings` to `False`. To set the decoder you can set
+the parameter `non_autoregressive_decoder` to:
+ * `'fixed''` for predicting a fixed number of `tau` edit actions from each source symbol
+ * `'position'` for predicting a flexible number of edit operations, where position information is only available
+   through learned position embeddings
+ * `'lstm'` for predicting a flexible number of edit operations, where position information is available through a LSTM
+   decoder that receives the source symbol encoding as input and operates on every source symbol independently
+
+To use flexible $\tau$, it is also necessary to set the `tau` parameter to `None`.
+To use fixed $\tau$, it is necessary to set the `tau` parameter to some integer $>0$.
+Please note that in the case of fixed $\tau$, the model explicitly parametrises all $\tau$ prediction positions using
+a MLP, therefore choosing a large $\tau$ also causes a large number of parameters.
 
 ## Usage
 You need 3 ingredients to use this code:
