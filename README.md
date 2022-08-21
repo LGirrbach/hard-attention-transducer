@@ -89,13 +89,13 @@ $t_{1:n}$ from source sequence prefix $s_{1:m}$ recursively by
 $$
 P(t_{1:n}|s_{1:m}) =
 P_{\text{del}}(s_m) \cdot P(t_{1:n}|s_{1:m-1}) +
-\delta_{t_n == s_m} \cdot P_{\text{copy-shift}}(s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) + 
+\delta_{t_n = s_m} \cdot P_{\text{copy-shift}}(s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) + 
 P_{\text{sub}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m-1}) +
-\delta_{t_n == s_m} \cdot P_{\text{copy}}(s_m) \cdot P(t_{1:n-1}|s_{1:m}) +
+\delta_{t_n = s_m} \cdot P_{\text{copy}}(s_m) \cdot P(t_{1:n-1}|s_{1:m}) +
 P_{\text{ins}}(t_n|s_m) \cdot P(t_{1:n-1}|s_{1:m})
 $$
 where $P_{\text{del}}, P_{\text{copy-shift}}, P_{\text{sub}}, P_{\text{copy}}, P_{\text{ins}}$ are the probabilities
-for Delete, CopyShift, Substitution, Copy, and Insertion. $\delta_{t_n == s_m}$ is the indicator function stating
+for Delete, CopyShift, Substitution, Copy, and Insertion. $\delta_{t_n = s_m}$ is the indicator function stating
 whether copying is possible (target symbol equals source symbol).
 
 ### Non-Autoregressive Decoder
