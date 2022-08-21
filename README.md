@@ -141,11 +141,10 @@ $$
 if $q = 1$ and
 
 $$
-\begin{align}
-P(t_{1:n}|s_{1:m}, q) = 
-\quad &P_{\text{copy}}(s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \cdot \delta_{t_n = s_m} \\
-&+ P_{\text{ins}}(t_n|s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \\
-&\left. \right)
+\begin{equation}
+P(t_{1:n}|s_{1:m}, q) =
+P_{\text{copy}}(s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1) \cdot \delta_{t_n = s_m}
++ P_{\text{ins}}(t_n|s_m, q) \cdot P(t_{1:n-1}|s_{1:m}, q-1)
 \end{align}
 $$
 
