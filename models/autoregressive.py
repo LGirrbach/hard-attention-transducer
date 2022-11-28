@@ -17,7 +17,7 @@ class LSTMEncoderDecoderModel(TransducerModel):
                  hidden_size: int = 128, num_layers: int = 2, dropout: float = 0.0, temperature: float = 1.0,
                  scorer: str = "softmax", device: torch.device = torch.device("cpu"), use_features: bool = False,
                  feature_vocab_size: int = 0, feature_encoder_hidden: int = 128, feature_encoder_layers: int = 0,
-                 feature_encoder_pooling: str = "mean"):
+                 feature_encoder_pooling: str = "mean", encoder_bridge: bool = False):
         super(LSTMEncoderDecoderModel, self).__init__()
 
         self.source_vocab_size = source_vocab_size
@@ -34,6 +34,7 @@ class LSTMEncoderDecoderModel(TransducerModel):
         self.feature_encoder_hidden = feature_encoder_hidden
         self.feature_encoder_layers = feature_encoder_layers
         self.feature_encoder_pooling = feature_encoder_pooling
+        self.encoder_bridge = encoder_bridge
 
         # Make Embedders
         self.encoder_embedder = Embedder(vocab_size=source_vocab_size, embedding_dim=embedding_dim, dropout=dropout)
@@ -46,7 +47,7 @@ class LSTMEncoderDecoderModel(TransducerModel):
         )
         self.decoder = LSTMDecoder(
             input_size=self.decoder_embedder.embedding_dim, hidden_size=self.hidden_size, num_layers=self.num_layers,
-            dropout=self.dropout
+            dropout=self.dropout, encoder_bridge=encoder_bridge
         )
 
         # Make feature encoder

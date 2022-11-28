@@ -80,7 +80,8 @@ def _build_model(source_vocab_size: int, target_vocab_size: int, settings: Setti
                 num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
                 scorer=settings.scorer, temperature=settings.temperature, use_features=settings.use_features,
                 feature_vocab_size=feature_vocab_size, feature_encoder_hidden=settings.hidden_size,
-                feature_encoder_pooling=settings.features_pooling, feature_encoder_layers=settings.features_num_layers
+                feature_encoder_pooling=settings.features_pooling, feature_encoder_layers=settings.features_num_layers,
+                encoder_bridge=settings.encoder_bridge
             )
         else:
             return NonAutoregressiveLSTM(

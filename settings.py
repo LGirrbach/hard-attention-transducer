@@ -38,6 +38,7 @@ setting_fields = [
     "temperature",  # Scaling factor for raw prediction scores
     "features_num_layers",  # Number of hidden layers in feature encoder
     "features_pooling",  # Pooling method to combine feature encodings
+    "encoder_bridge",  # Pass summary of source sequence to autoregressive decoder
 
     # Loss Settings
     "noop_discount",  # Discount factor for loss incurred by blank actions (only for non-autoregressive model)
@@ -122,6 +123,9 @@ def make_argument_parser():
         "--features-pooling", type=str, default="max", choices=["max", "sum", "mean", "dot", "mlp"],
         help="Pooling method for feature encoder"
     )
+    parser.add_argument(
+        "--encoder-bridge", action="store_true", help="Pass summary of encoder sequence to autoregressive decoder"
+    )
 
     # Loss Settings
     parser.add_argument(
@@ -180,7 +184,8 @@ def get_settings_from_arguments() -> Settings:
         features_num_layers=args.features_num_layers, features_pooling=args.features_pooling,
         noop_discount=args.noop_discount, allow_copy=allow_copy, enforce_copy=args.enforce_copy, name=args.name,
         train_data_path=args.train_data, dev_data_path=args.dev_data, save_path=args.save_path,
-        beam_search=args.beam_search, num_beams=args.beams, max_decoding_length=args.max_decoding_length
+        beam_search=args.beam_search, num_beams=args.beams, max_decoding_length=args.max_decoding_length,
+        encoder_bridge=args.encoder_bridge
     )
 
     return settings
@@ -197,7 +202,7 @@ def make_settings(
         temperature: float = 1.0, features_num_layers: int = 0, features_pooling: str = "mean",
         noop_discount: float = 1.0, allow_copy: bool = True, enforce_copy: bool = False,
         train_data_path: Optional[str] = None, dev_data_path: Optional[str] = None, beam_search: bool = True,
-        num_beams: int = 5, max_decoding_length: int = 100) -> Settings:
+        num_beams: int = 5, max_decoding_length: int = 100, encoder_bridge: bool = False) -> Settings:
     return Settings(
         epochs=epochs, batch=batch, device=device, scheduler=scheduler, gamma=gamma,
         verbose=verbose, report_progress_every=report_progress_every, main_metric=main_metric,
@@ -209,5 +214,6 @@ def make_settings(
         features_num_layers=features_num_layers, features_pooling=features_pooling,
         noop_discount=noop_discount, allow_copy=allow_copy, enforce_copy=enforce_copy, name=name,
         train_data_path=train_data_path, dev_data_path=dev_data_path, save_path=save_path,
-        beam_search=beam_search, num_beams=num_beams, max_decoding_length=max_decoding_length
+        beam_search=beam_search, num_beams=num_beams, max_decoding_length=max_decoding_length,
+        encoder_bridge=encoder_bridge
     )
