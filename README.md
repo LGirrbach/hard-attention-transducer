@@ -34,10 +34,14 @@ previously predicted edit action into account, this information must be availabl
 or by using an external aligner, which are both not differentiable computations (if we view the aligner as part of the
 optimisation goal).
 
-Note that hard attention is inherently a non-differentiable operation. However, end-to-end training of _monotonous_
-hard attention (i.e. attention can only shift to the next following source symbol or stay in the current position) can
-be done efficiently by marginalising over all possible alignments using dynamic programming. The main idea has been
-described by [Yu et al. (2016)](https://aclanthology.org/D16-1138) and
+Note that hard attention is inherently a non-differentiable operation. However, end-to-end training
+be done efficiently by marginalising over all possible alignments using dynamic programming.
+For detailed description, see [Wu et al. (2018)](https://aclanthology.org/D18-1473/) and
+[Wu and Cotterell (2019)](https://aclanthology.org/P19-1148/).
+In this implementation, differently from [Wu et al. (2018)](https://aclanthology.org/D18-1473/), we employ
+monotonic hard attention and attention positions are determined by the predicted actions, i.e. the attention position
+can only stay the same of move to the next source symbol.
+The main idea of end-to-end training for this variant is described by [Yu et al. (2016)](https://aclanthology.org/D16-1138) and
 [Libovický and Fraser (2022)](https://aclanthology.org/2022.spnlp-1.6).
 
 ## Model Descriptions
@@ -206,6 +210,8 @@ source symbols.
    [Makarov and Clematide (2018b)](https://aclanthology.org/D18-1314),
    [Clematide and Makarov (2021)](https://aclanthology.org/2021.sigmorphon-1.17),
    [Wehrli et al. (2022)](https://aclanthology.org/2022.sigmorphon-1.21)
+ * Hard Attention in general: [Wu et al. (2018)](https://aclanthology.org/D18-1473/) and
+   [Wu and Cotterell (2019)](https://aclanthology.org/P19-1148/)
  * End-to-End Training for Hard Attention: [Yu et al. (2016)](https://aclanthology.org/D16-1138),
    [Libovický and Fraser (2022)](https://aclanthology.org/2022.spnlp-1.6)
  * Non-Autoregressive Models: [Libovický and Helcl (2018)](https://aclanthology.org/D18-1336)
