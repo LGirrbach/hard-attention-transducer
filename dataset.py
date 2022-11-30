@@ -23,6 +23,11 @@ RawDataset = namedtuple("RawDataset", ["sources", "targets", "features"])
 RawBatchElement = namedtuple("RawBatch", ["source", "target", "features"])
 
 
+class SoftAttentionDataset(Dataset):
+    def __init__(self, dataset):
+        raise NotImplementedError
+
+
 class TransducerDatasetTrain(Dataset, ABC):
     def __init__(self, dataset: RawDataset, source_vocabulary: SourceVocabulary,
                  target_vocabulary: TransducerVocabulary, feature_vocabulary: Optional[SourceVocabulary] = None,

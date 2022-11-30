@@ -110,3 +110,35 @@ class TransducerVocabulary:
     def build_vocabulary(cls, sequences: List[List[str]]) -> TransducerVocabulary:
         all_tokens = list(set.union(*(set(sequence) for sequence in sequences)))
         return cls(symbols=all_tokens)
+
+
+class Seq2SeqVocabulary:
+    PAD_TOKEN = "<PAD>"
+    UNK_TOKEN = "<UNK>"
+    SOS_TOKEN = "<SOS>"
+    EOS_TOKEN = "<EOS>"
+
+    def __init__(self, symbols: List[str]):
+        self.symbols = self.get_special_symbols() + list(sorted(set(symbols)))
+        self.symbol2idx = {symbol: idx for idx, symbol in enumerate(self.symbols)}
+        self.idx2symbol = {idx: symbol for idx, symbol in enumerate(self.symbols)}
+
+    def get_special_symbols(self) -> List[str]:
+        return [self.PAD_TOKEN, self.UNK_TOKEN, self.SOS_TOKEN, self.EOS_TOKEN]
+
+    def __len__(self) -> int:
+        return len(self.symbols)
+
+    def __getitem__(self, idx: int) -> str:
+        return self.symbols[idx]
+
+    def get_symbol_index(self, symbol: str) -> int:
+        return self.symbol2idx.get(symbol, self.symbol2idx[self.UNK_TOKEN])
+
+    def index_sequence(self, symbols: List[str]) -> List[int]:
+        return [self.get_symbol_index(symbol) for symbol in symbols]
+
+    @classmethod
+    def build_vocabulary(cls, sequences: List[List[str]]) -> Seq2SeqVocabulary:
+        all_tokens = list(set.union(*(set(sequence) for sequence in sequences)))
+        return cls(symbols=all_tokens)

@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from typing import List
 from typing import Tuple
+from torch import Tensor
 from logger import logger
 from dataset import Batch
 from typing import Optional
@@ -15,6 +16,8 @@ from torch.optim import AdamW
 from settings import Settings
 from dataset import RawDataset
 from collections import namedtuple
+from loss import soft_attention_loss
+from models import SoftAttentionModel
 from models.base import TransducerModel
 from torch.utils.data import DataLoader
 from models import NonAutoregressiveLSTM
@@ -25,6 +28,7 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.optim.lr_scheduler import ExponentialLR
 from loss import autoregressive_transduction_loss
 from inference import non_autoregressive_inference
+from inference import soft_attention_greedy_sampling, soft_attention_beam_search_sampling
 from inference import autoregressive_greedy_sampling
 from loss import non_autoregressive_transduction_loss
 from dataset import AutoregressiveTransducerDatasetTrain
@@ -72,28 +76,39 @@ def _prepare_datasets(train_data: RawDataset, development_data: Optional[RawData
 
 def _build_model(source_vocab_size: int, target_vocab_size: int, settings: Settings,
                  feature_vocab_size: Optional[int] = None) -> TransducerModel:
-    if settings.model == "lstm":
-        if settings.autoregressive:
-            return LSTMEncoderDecoderModel(
-                source_vocab_size=source_vocab_size, target_vocab_size=target_vocab_size,
-                embedding_dim=settings.embedding_size, hidden_size=settings.hidden_size,
-                num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
-                scorer=settings.scorer, temperature=settings.temperature, use_features=settings.use_features,
-                feature_vocab_size=feature_vocab_size, feature_encoder_hidden=settings.hidden_size,
-                feature_encoder_pooling=settings.features_pooling, feature_encoder_layers=settings.features_num_layers,
-                encoder_bridge=settings.encoder_bridge
-            )
-        else:
-            return NonAutoregressiveLSTM(
-                source_vocab_size=source_vocab_size, target_vocab_size=target_vocab_size,
-                embedding_dim=settings.embedding_size, hidden_size=settings.hidden_size,
-                num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
-                tau=settings.tau, scorer=settings.scorer, temperature=settings.temperature,
-                use_features=settings.use_features, feature_vocab_size=feature_vocab_size,
-                feature_encoder_layers=settings.features_num_layers, feature_encoder_hidden=settings.hidden_size,
-                feature_encoder_pooling=settings.features_pooling, decoder_type=settings.non_autoregressive_decoder,
-                max_targets_per_symbol=settings.max_targets_per_symbol
-            )
+    if settings.model == "autoregressive":
+        return LSTMEncoderDecoderModel(
+            source_vocab_size=source_vocab_size, target_vocab_size=target_vocab_size,
+            embedding_dim=settings.embedding_size, hidden_size=settings.hidden_size,
+            num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
+            scorer=settings.scorer, temperature=settings.temperature, use_features=settings.use_features,
+            feature_vocab_size=feature_vocab_size, feature_encoder_hidden=settings.hidden_size,
+            feature_encoder_pooling=settings.features_pooling, feature_encoder_layers=settings.features_num_layers,
+            encoder_bridge=settings.encoder_bridge
+        )
+
+    elif settings.model == "non-autoregressive":
+        return NonAutoregressiveLSTM(
+            source_vocab_size=source_vocab_size, target_vocab_size=target_vocab_size,
+            embedding_dim=settings.embedding_size, hidden_size=settings.hidden_size,
+            num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
+            tau=settings.tau, scorer=settings.scorer, temperature=settings.temperature,
+            use_features=settings.use_features, feature_vocab_size=feature_vocab_size,
+            feature_encoder_layers=settings.features_num_layers, feature_encoder_hidden=settings.hidden_size,
+            feature_encoder_pooling=settings.features_pooling, decoder_type=settings.non_autoregressive_decoder,
+            max_targets_per_symbol=settings.max_targets_per_symbol
+        )
+
+    elif settings.model == "soft-attention":
+        return SoftAttentionModel(
+            source_vocab_size=source_vocab_size, target_vocab_size=target_vocab_size,
+            embedding_dim=settings.embedding_size, hidden_size=settings.hidden_size,
+            num_layers=settings.hidden_layers, dropout=settings.dropout, device=settings.device,
+            scorer=settings.scorer, temperature=settings.temperature, use_features=settings.use_features,
+            feature_vocab_size=feature_vocab_size, feature_encoder_hidden=settings.hidden_size,
+            feature_encoder_pooling=settings.features_pooling, feature_encoder_layers=settings.features_num_layers,
+            encoder_bridge=settings.encoder_bridge
+        )
 
     else:
         raise ValueError(f"Unknown model type: {settings.model}")
@@ -179,7 +194,7 @@ def load_model(path: str) -> TrainedModel:
     )
 
 
-def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, development_data: TransducerDatasetTrain,
+def evaluate_on_development_set(model_name: str, model: TrainedModel, development_data: TransducerDatasetTrain,
                                 batch_size: int, device: torch.device, max_decoding_length: int):
     assert development_data is not None
 
@@ -212,7 +227,7 @@ def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, devel
             else:
                 batch_features = None
 
-            if autoregressive:
+            if model_name == "autoregressive":
                 batch_losses = _get_autoregressive_loss(
                     model=model, batch=batch, device=device, allow_copy=True, enforce_copy=False, reduction='none'
                 )
@@ -222,7 +237,7 @@ def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, devel
                     feature_vocabulary=feature_vocabulary
                 )
 
-            else:
+            elif model_name == "non-autoregressive":
                 batch_losses = _get_non_autoregressive_loss(
                     model=model, batch=batch, device=device, allow_copy=True, enforce_copy=False, noop_discount=1.0,
                     reduction='none'
@@ -232,6 +247,17 @@ def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, devel
                     sequences=batch_sources, features=batch_features, feature_vocabulary=feature_vocabulary,
                     max_decoding_length=max_decoding_length
                 )
+
+            elif model_name == "soft-attention":
+                batch_losses = _get_soft_attention_loss(model=model, batch=batch, reduction="none")
+                batch_predictions = soft_attention_greedy_sampling(
+                    model=model, source_vocabulary=source_vocabulary, target_vocabulary=target_vocabulary,
+                    sequences=batch_sources, max_decoding_length=max_decoding_length, features=batch_features,
+                    feature_vocabulary=feature_vocabulary
+                )
+
+            else:
+                raise ValueError(f"Unknown model name: {model_name}")
 
             batch_losses = batch_losses.detach().cpu().tolist()
             losses.extend(batch_losses)
@@ -264,7 +290,7 @@ def evaluate_on_development_set(autoregressive: bool, model: TrainedModel, devel
 
 
 def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch.device, allow_copy: bool,
-                             enforce_copy: bool, reduction: str) -> torch.Tensor:
+                             enforce_copy: bool, reduction: str) -> Tensor:
     source_encodings = model.encode(batch.sources, batch.source_lengths)
     target_encodings, _ = model.decode(batch.targets, batch.target_lengths, source_encodings, batch.source_lengths)
 
@@ -286,8 +312,26 @@ def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch
     return loss
 
 
+def _get_soft_attention_loss(model: TransducerModel, batch: Batch, reduction: str) -> Tensor:
+    targets = batch.targets[:, 1:]
+    target_lengths = batch.target_lengths - 1
+
+    source_encodings = model.encode(batch.sources, batch.source_lengths)
+    target_encodings, _ = model.decode(targets, target_lengths, source_encodings, batch.source_lengths)
+
+    if model.use_features:
+        scores = model.get_transduction_scores(target_encodings, batch.features, batch.feature_lengths)
+    else:
+        scores = model.get_transduction_scores(target_encodings)
+
+    scores = scores[:, :-1]
+    labels = batch.targets[:, 2:]  # Remove SOS symbols from labels
+    loss = soft_attention_loss(scores=scores, target_labels=labels, reduction=reduction)
+    return loss
+
+
 def _get_non_autoregressive_loss(model: nn.Module, batch: Batch, device: torch.device, allow_copy: bool,
-                                 enforce_copy: bool, noop_discount: float, reduction: str) -> torch.Tensor:
+                                 enforce_copy: bool, noop_discount: float, reduction: str) -> Tensor:
     tau = model.tau
     if tau is None:
         tau = batch.target_lengths.max().detach().cpu().item()
@@ -319,8 +363,11 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
         logger.info("Prepare for Training")
         logger.info("Build vocabulary and datasets")
 
+    is_non_autoregressive = settings.model == "non-autoregressive"
+    is_autoregressive = not is_non_autoregressive
+
     source_vocabulary, target_vocabulary, feature_vocabulary, train_dataset, dev_dataset = _prepare_datasets(
-        train_data=train_data, development_data=development_data, autoregressive=settings.autoregressive,
+        train_data=train_data, development_data=development_data, autoregressive=is_autoregressive,
         use_features=settings.use_features
     )
     max_development_decoding_length = max([len(datapoint.target) for datapoint in train_dataset]) + 10
@@ -340,8 +387,13 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
         logger.info("Build model")
 
     feature_vocab_size = None if feature_vocabulary is None else len(feature_vocabulary)
+    if settings.model == "soft-attention":
+        target_vocab_size = len(target_vocabulary.symbols)
+    else:
+        target_vocab_size = len(target_vocabulary)
+
     model = _build_model(
-        source_vocab_size=len(source_vocabulary), target_vocab_size=len(target_vocabulary), settings=settings,
+        source_vocab_size=len(source_vocabulary), target_vocab_size=target_vocab_size, settings=settings,
         feature_vocab_size=feature_vocab_size
     )
 
@@ -367,7 +419,6 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
     )
 
     if settings.verbose:
-        logger.info("Build probability normalisation function")
         logger.info("Start Training")
 
     running_loss = None
@@ -384,16 +435,23 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
         for batch in train_dataloader:
             optimizer.zero_grad()
 
-            if settings.autoregressive:
+            if settings.model == "autoregressive":
                 loss = _get_autoregressive_loss(
                     model=model, batch=batch, allow_copy=settings.allow_copy, enforce_copy=settings.enforce_copy,
                     device=settings.device, reduction='mean'
                 )
-            else:
+
+            elif settings.model == "non-autoregressive":
                 loss = _get_non_autoregressive_loss(
                     model=model, batch=batch, allow_copy=settings.allow_copy, enforce_copy=settings.enforce_copy,
                     device=settings.device, noop_discount=settings.noop_discount, reduction='mean'
                 )
+
+            elif settings.model == "soft-attention":
+                loss = _get_soft_attention_loss(model=model, batch=batch, reduction="mean")
+
+            else:
+                raise ValueError(f"Unknown model: {settings.model}")
 
             # Update parameters
             loss.backward()
@@ -419,15 +477,17 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
                         f" || Step {step_counter} / {total_num_steps}"
                     )
 
+        scheduler_step(epoch_end=True)
+
         # Evaluate on dev set
         epoch_model = TrainedModel(
             model=model, source_vocabulary=source_vocabulary, target_vocabulary=target_vocabulary,
             feature_vocabulary=feature_vocabulary, metrics=None, checkpoint=None, settings=settings
         )
 
-        if dev_dataset is not None:
+        if dev_dataset is not None and (epoch % settings.evaluate_every == 0 or epoch == settings.epochs):
             development_metrics = evaluate_on_development_set(
-                autoregressive=settings.autoregressive, model=epoch_model, development_data=dev_dataset,
+                model_name=settings.model, model=epoch_model, development_data=dev_dataset,
                 batch_size=settings.batch, device=settings.device, max_decoding_length=max_development_decoding_length,
             )
 
@@ -439,10 +499,11 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
                     f" || Edit-Distance: {development_metrics['edit_distance']:.2f}"
                 )
 
-        else:
+        elif dev_dataset is None:
             development_metrics = None
 
-        scheduler_step(epoch_end=True)
+        else:
+            continue
 
         if development_metrics is not None:
             epoch_model_metric = development_metrics[settings.main_metric]

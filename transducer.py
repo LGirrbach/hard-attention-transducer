@@ -10,7 +10,9 @@ from trainer import load_model
 from trainer import TrainedModel
 from inference import TransducerPrediction
 from inference import non_autoregressive_inference
+from inference import soft_attention_greedy_sampling
 from inference import autoregressive_greedy_sampling
+from inference import soft_attention_beam_search_sampling
 from inference import autoregressive_beam_search_sampling
 
 Sequences = List[List[str]]
@@ -64,25 +66,52 @@ class Transducer:
 
         return predictions
 
-    def _predict_batch(self, sources: Sequences, features: Optional[Sequences] = None) -> List[TransducerPrediction]:
-        if self.settings.autoregressive:
-            if self.settings.beam_search:
-                return autoregressive_beam_search_sampling(
-                    model=self.model.model, source_vocabulary=self.model.source_vocabulary,
-                    target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
-                    num_beams=self.settings.num_beams, max_decoding_length=self.settings.max_decoding_length,
-                    sequences=sources, features=features
-                )
-            else:
-                return autoregressive_greedy_sampling(
-                    model=self.model.model, source_vocabulary=self.model.source_vocabulary,
-                    target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
-                    max_decoding_length=self.settings.max_decoding_length, sequences=sources, features=features
-                )
-
-        else:
-            return non_autoregressive_inference(
+    def _predict_soft_attention_batch(self, sources: Sequences, features: Optional[Sequences] = None) \
+            -> List[TransducerPrediction]:
+        if self.settings.beam_search:
+            return soft_attention_beam_search_sampling(
                 model=self.model.model, source_vocabulary=self.model.source_vocabulary,
                 target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
+                num_beams=self.settings.num_beams, max_decoding_length=self.settings.max_decoding_length,
                 sequences=sources, features=features
             )
+        else:
+            return soft_attention_greedy_sampling(
+                model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+                target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
+                max_decoding_length=self.settings.max_decoding_length, sequences=sources, features=features
+            )
+
+    def _predict_autoregressive_batch(self, sources: Sequences, features: Optional[Sequences] = None) \
+            -> List[TransducerPrediction]:
+        if self.settings.beam_search:
+            return autoregressive_beam_search_sampling(
+                model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+                target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
+                num_beams=self.settings.num_beams, max_decoding_length=self.settings.max_decoding_length,
+                sequences=sources, features=features
+            )
+        else:
+            return autoregressive_greedy_sampling(
+                model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+                target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
+                max_decoding_length=self.settings.max_decoding_length, sequences=sources, features=features
+            )
+
+    def _predict_non_autoregressive_batch(self, sources: Sequences, features: Optional[Sequences] = None) \
+            -> List[TransducerPrediction]:
+        return non_autoregressive_inference(
+            model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+            target_vocabulary=self.model.target_vocabulary, feature_vocabulary=self.model.feature_vocabulary,
+            sequences=sources, features=features
+        )
+
+    def _predict_batch(self, sources: Sequences, features: Optional[Sequences] = None) -> List[TransducerPrediction]:
+        if self.settings.model == "soft-attention":
+            return self._predict_soft_attention_batch(sources=sources, features=features)
+        elif self.settings.model == "autoregressive":
+            return self._predict_autoregressive_batch(sources=sources, features=features)
+        elif self.settings.model == "non-autoregressive":
+            return self._predict_non_autoregressive_batch(sources=sources, features=features)
+        else:
+            raise ValueError(f"Unknown model: {self.settings.model}")

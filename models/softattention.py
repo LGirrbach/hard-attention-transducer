@@ -9,16 +9,17 @@ from models.decoder import LSTMDecoder
 from models.base import TransducerModel
 from models.encoder import BiLSTMEncoder
 from models.decoder import DecoderOutput
+from models.attention import MLPAttention
 from models.feature_encoder import FeatureEncoder
 
 
-class LSTMEncoderDecoderModel(TransducerModel):
+class SoftAttentionModel(TransducerModel):
     def __init__(self, source_vocab_size: int, target_vocab_size: int, embedding_dim: int = 128,
                  hidden_size: int = 128, num_layers: int = 2, dropout: float = 0.0, temperature: float = 1.0,
                  scorer: str = "softmax", device: torch.device = torch.device("cpu"), use_features: bool = False,
                  feature_vocab_size: int = 0, feature_encoder_hidden: int = 128, feature_encoder_layers: int = 0,
                  feature_encoder_pooling: str = "mean", encoder_bridge: bool = False):
-        super(LSTMEncoderDecoderModel, self).__init__()
+        super(SoftAttentionModel, self).__init__()
 
         self.source_vocab_size = source_vocab_size
         self.target_vocab_size = target_vocab_size
@@ -69,6 +70,11 @@ class LSTMEncoderDecoderModel(TransducerModel):
         else:
             prediction_head_input_size = 2 * self.hidden_size
 
+        # Make soft attention mechanism
+        self.attention = MLPAttention(
+            query_size=hidden_size, key_size=hidden_size, hidden_size=hidden_size, dropout=dropout
+        )
+
         self.classifier = nn.Sequential(
             nn.Dropout(p=self.dropout),
             nn.Linear(prediction_head_input_size, self.hidden_size),
@@ -113,29 +119,26 @@ class LSTMEncoderDecoderModel(TransducerModel):
             decoder_embedded, decoder_lengths, encoder_outputs, encoder_lengths, hidden=hidden
         )
 
+        context = self.attention(
+            queries=decoder_encoded, keys=encoder_outputs, query_lengths=decoder_lengths, key_lengths=encoder_lengths
+        )
+
+        decoder_encoded = torch.cat([decoder_encoded, context], dim=-1)
+
         return decoder_encoded, (old_hidden, new_hidden)
 
-    def get_transduction_scores(self, source_encodings: Tensor, target_encodings: Tensor,
-                                features: Optional[Tensor] = None, feature_lengths: Optional[Tensor] = None) -> Tensor:
-        batch, hidden = target_encodings.shape[0], target_encodings.shape[2]
-        timesteps_decoder = target_encodings.shape[1]
-        timesteps_encoder = source_encodings.shape[1]
-
-        decoder_outputs = target_encodings.unsqueeze(2).expand((batch, timesteps_decoder, timesteps_encoder, hidden))
-        encoder_outputs = source_encodings.unsqueeze(2).expand((batch, timesteps_encoder, timesteps_decoder, hidden))
-        encoder_outputs = encoder_outputs.transpose(1, 2)
-        classifier_inputs = torch.cat([encoder_outputs, decoder_outputs], dim=-1)
-
+    def get_transduction_scores(self, target_encodings: Tensor, features: Optional[Tensor] = None,
+                                feature_lengths: Optional[Tensor] = None) -> Tensor:
         # Make feature representations (optional)
         if self.use_features:
             feature_encodings = self.feature_encoder(
-                features, feature_lengths, classifier_inputs.reshape(batch, -1, 2 * hidden)
+                features, feature_lengths, target_encodings
             )
-            feature_encodings = feature_encodings.reshape(batch, timesteps_decoder, timesteps_encoder, -1)
-            classifier_inputs = torch.cat([classifier_inputs, feature_encodings], dim=-1)
+            classifier_inputs = torch.cat([target_encodings, feature_encodings], dim=-1)
+        else:
+            classifier_inputs = target_encodings
 
         scores = self.classifier(classifier_inputs)
-        scores = scores.transpose(1, 2)
-        scores = self.normalise_scores(scores / self.temperature)
+        scores = scores / self.temperature
 
         return scores

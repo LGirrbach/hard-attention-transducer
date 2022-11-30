@@ -14,6 +14,7 @@ setting_fields = [
     "gamma",  # Decay factor for exponential learning rate scheduler
     "verbose",  # Whether to print training progress
     "report_progress_every",  # Number of updates between loss reports
+    "evaluate_every",  # Number of epochs between evaluating on dev set
     "main_metric",  # Development metric used for evaluating training progress (training loss if no dev data)
     "keep_only_best_checkpoint",  # Whether to only save the best checkpoint (according to loss / dev score)
     "use_features",  # Whether to use additional features (e.g. for inflection)
@@ -25,12 +26,11 @@ setting_fields = [
     "grad_clip",  # Max. absolute value of gradients (not applied if None)
 
     # Model Settings
-    "model",  # Model type (currently only lstm)
+    "model",  # Model type (autoregressive, non-autoregressive, soft-attention)
     "embedding_size",  # Num dimensions of embedding vectors
     "hidden_size",  # Hidden size
     "hidden_layers",  # Num of layers of encoders / decoders
     "dropout",  # Dropout probability
-    "autoregressive",  # Whether to use autoregressive or non-autoregressive transducer
     "tau",  # Branching factor for non-autoregressive model
     "non_autoregressive_decoder",  # Whether to use fixed / position / lstm decoder for non-autoregressive model
     "max_targets_per_symbol",  # Maximum number of target symbol decoded from a single input symbol
@@ -80,6 +80,7 @@ def make_argument_parser():
     parser.add_argument("--gamma", type=float, default=1.0, help="Decay for Exponential LR Scheduler")
     parser.add_argument("--silent", action="store_true", help="Disables training progress output")
     parser.add_argument("--report-progress-every", type=int, default=10, help="Number of updates between loss reports")
+    parser.add_argument("--evaluate-every", type=int, default=1, help="Number of epochs between evaluating on dev set")
     parser.add_argument(
         "--main-metric", type=str, choices=["loss", "wer", "edit_distance"], default="loss",
         help="Development metric used for evaluating training progress (training loss if no dev data)"
@@ -101,7 +102,6 @@ def make_argument_parser():
     parser.add_argument("--hidden", type=int, default=64, help="Hidden size")
     parser.add_argument("--layers", type=int, default=1, help="Number of Encoder / Decoder Layers")
     parser.add_argument("--dropout", type=float, default=0.0, help="Dropout probability")
-    parser.add_argument("--non-autoregressive", action="store_true", help="Enable non autoregressive model")
     parser.add_argument("--tau", type=int, default=5, help="\\tau parameter for non-autoregressive model")
     parser.add_argument(
         "--non-autoregressive-decoder", type=str, default="position", choices=["fixed", "position", "lstm"],
@@ -169,7 +169,6 @@ def get_settings_from_arguments() -> Settings:
         device = torch.device("cpu")
 
     verbose = not args.silent
-    autoregressive = not args.non_autoregressive
     allow_copy = not args.disable_copy
 
     # Instantiate settings
@@ -179,25 +178,25 @@ def get_settings_from_arguments() -> Settings:
         keep_only_best_checkpoint=args.keep_only_best_checkpoint, use_features=args.use_features,
         optimizer=args.optimizer, lr=args.lr, weight_decay=args.weight_decay, grad_clip=args.grad_clip, model="lstm",
         embedding_size=args.embedding, hidden_size=args.hidden, hidden_layers=args.layers, dropout=args.dropout,
-        autoregressive=autoregressive, tau=args.tau, non_autoregressive_decoder=args.non_autoregressive_decoder,
+        tau=args.tau, non_autoregressive_decoder=args.non_autoregressive_decoder,
         max_targets_per_symbol=args.max_targets_per_symbol, scorer=args.scorer, temperature=args.temperature,
         features_num_layers=args.features_num_layers, features_pooling=args.features_pooling,
         noop_discount=args.noop_discount, allow_copy=allow_copy, enforce_copy=args.enforce_copy, name=args.name,
         train_data_path=args.train_data, dev_data_path=args.dev_data, save_path=args.save_path,
         beam_search=args.beam_search, num_beams=args.beams, max_decoding_length=args.max_decoding_length,
-        encoder_bridge=args.encoder_bridge
+        encoder_bridge=args.encoder_bridge, evaluate_every=args.evaluate_every
     )
 
     return settings
 
 
 def make_settings(
-        use_features: bool, autoregressive: bool, name: str, save_path: str,
+        use_features: bool, model: str, name: str, save_path: str,
         epochs: int = 1, batch: int = 16, device: torch.device = torch.device('cpu'),
         scheduler: str = "exponential", gamma: float = 1.0, verbose: bool = True, report_progress_every: int = 10,
         main_metric: str = "loss", keep_only_best_checkpoint: bool = True, optimizer: str = "sgd", lr: float = 0.001,
-        weight_decay: float = 0.0, grad_clip: Optional[float] = None, model: str = "lstm", embedding_size: int = 128,
-        hidden_size: int = 128, hidden_layers: int = 1, dropout: float = 0.0, tau: int = 5,
+        weight_decay: float = 0.0, grad_clip: Optional[float] = None, embedding_size: int = 128, hidden_size: int = 128,
+        hidden_layers: int = 1, dropout: float = 0.0, tau: Optional[int] = 5, evaluate_every: int = 1,
         non_autoregressive_decoder: str = "position", max_targets_per_symbol: int = 50, scorer: str = "softmax",
         temperature: float = 1.0, features_num_layers: int = 0, features_pooling: str = "mean",
         noop_discount: float = 1.0, allow_copy: bool = True, enforce_copy: bool = False,
@@ -209,11 +208,10 @@ def make_settings(
         keep_only_best_checkpoint=keep_only_best_checkpoint, use_features=use_features,
         optimizer=optimizer, lr=lr, weight_decay=weight_decay, grad_clip=grad_clip, model=model,
         embedding_size=embedding_size, hidden_size=hidden_size, hidden_layers=hidden_layers, dropout=dropout,
-        autoregressive=autoregressive, tau=tau, non_autoregressive_decoder=non_autoregressive_decoder,
-        max_targets_per_symbol=max_targets_per_symbol, scorer=scorer, temperature=temperature,
-        features_num_layers=features_num_layers, features_pooling=features_pooling,
-        noop_discount=noop_discount, allow_copy=allow_copy, enforce_copy=enforce_copy, name=name,
-        train_data_path=train_data_path, dev_data_path=dev_data_path, save_path=save_path,
-        beam_search=beam_search, num_beams=num_beams, max_decoding_length=max_decoding_length,
-        encoder_bridge=encoder_bridge
+        tau=tau, non_autoregressive_decoder=non_autoregressive_decoder, max_targets_per_symbol=max_targets_per_symbol,
+        scorer=scorer, temperature=temperature, features_num_layers=features_num_layers,
+        features_pooling=features_pooling, noop_discount=noop_discount, allow_copy=allow_copy,
+        enforce_copy=enforce_copy, name=name, train_data_path=train_data_path, dev_data_path=dev_data_path,
+        save_path=save_path, beam_search=beam_search, num_beams=num_beams, max_decoding_length=max_decoding_length,
+        encoder_bridge=encoder_bridge, evaluate_every=evaluate_every
     )

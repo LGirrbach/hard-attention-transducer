@@ -5,6 +5,7 @@ from typing import List
 from copy import deepcopy
 from typing import Optional
 from collections import namedtuple
+from collections import defaultdict
 from models.base import TransducerModel
 from torch.nn.utils.rnn import pad_sequence
 from vocabulary import SourceVocabulary, TransducerVocabulary
@@ -27,7 +28,7 @@ def non_autoregressive_inference(model: TransducerModel, source_vocabulary: Sour
     model = model.eval()
     model = model.to(model.device)
     tau: int = model.tau
-    if tau is None:
+    if tau is None or tau > max_decoding_length:
         tau = max_decoding_length
 
     # Index sources
@@ -54,9 +55,10 @@ def non_autoregressive_inference(model: TransducerModel, source_vocabulary: Sour
     with torch.no_grad():
         scores = model(
             sources=sources, lengths=source_lengths, features=features, feature_lengths=feature_lengths,
-            tau=max_decoding_length
+            tau=tau
         )
         scores = scores.reshape(len(sequences), -1, len(target_vocabulary))
+        scores = scores[:, :max_decoding_length, :]
         predictions = scores.argmax(dim=-1).detach().cpu()
 
     # Decode predictions
@@ -114,7 +116,261 @@ def non_autoregressive_inference(model: TransducerModel, source_vocabulary: Sour
     return predictions
 
 
-def autoregressive_greedy_sampling(model: nn.Module, source_vocabulary: SourceVocabulary,
+def soft_attention_greedy_sampling(model: TransducerModel, source_vocabulary: SourceVocabulary,
+                                   target_vocabulary: TransducerVocabulary, sequences: List[List[str]],
+                                   feature_vocabulary: Optional[SourceVocabulary] = None,
+                                   features: Optional[List[List[str]]] = None,
+                                   max_decoding_length: int = 70) -> List[TransducerPrediction]:
+    model = model.eval()
+    model = model.to(model.device)
+
+    # Index sources
+    sequences = [
+        [source_vocabulary.SOS_TOKEN] + source + [source_vocabulary.EOS_TOKEN] for source in sequences
+    ]
+    source_lengths = torch.tensor([len(source) for source in sequences]).long()
+    sources = [torch.tensor(source_vocabulary.index_sequence(source)).long() for source in sequences]
+    sources = pad_sequence(sources, padding_value=0, batch_first=True)
+
+    # Index features
+    if model.use_features:
+        features = [
+            [feature_vocabulary.SOS_TOKEN] + feats + [feature_vocabulary.EOS_TOKEN] for feats in features
+        ]
+        feature_lengths = torch.tensor([len(feats) for feats in features]).long()
+        features = [torch.tensor(feature_vocabulary.index_sequence(feats)).long() for feats in features]
+        features = pad_sequence(features, padding_value=0, batch_first=True)
+    else:
+        features = None
+        feature_lengths = None
+
+    # Run encoder
+    with torch.no_grad():
+        source_encodings = model.encode(sources, source_lengths)
+
+    # Store generated predictions
+    hypotheses = {sequence_idx: [target_vocabulary.SOS_TOKEN] for sequence_idx in range(len(sequences))}
+    active_sequences = list(range(len(sequences)))
+
+    # Store previously sampled tokens
+    sampled_tokens = [[target_vocabulary.get_symbol_index(target_vocabulary.SOS_TOKEN)] for _ in sequences]
+    sampled_tokens = torch.tensor(sampled_tokens).long()
+
+    hidden = None
+
+    for _ in range(max_decoding_length):
+        decoder_input_lengths = torch.ones(sampled_tokens.shape[0]).long()
+        target_encodings, (old_hidden, new_hidden) = model.decode(
+            sampled_tokens, decoder_input_lengths, source_encodings, source_lengths.long(), hidden=hidden
+        )
+
+        scores = model.get_transduction_scores(
+            target_encodings, features=features, feature_lengths=feature_lengths
+        )
+        scores = scores.squeeze(1)
+        predictions = torch.argmax(scores, dim=-1).detach().cpu().flatten().tolist()
+
+        new_sampled_tokens = []
+        new_active_sequences = []
+
+        for sequence_idx, prediction_idx in enumerate(predictions):
+            sampled_token = target_vocabulary.idx2symbol[prediction_idx]
+            hypotheses[sequence_idx].append(sampled_token)
+
+            if sampled_token == target_vocabulary.EOS_TOKEN or sequence_idx not in active_sequences:
+                new_sampled_tokens.append(target_vocabulary.get_symbol_index(target_vocabulary.EOS_TOKEN))
+            else:
+                new_sampled_tokens.append(prediction_idx)
+                new_active_sequences.append(sequence_idx)
+
+        if len(active_sequences) == 0:
+            break
+
+        active_sequences = new_active_sequences
+        sampled_tokens = torch.tensor(new_sampled_tokens).reshape(-1, 1)
+        hidden = new_hidden
+
+    predictions = []
+    for sequence_idx in range(len(sequences)):
+        hypothesis = hypotheses[sequence_idx]
+        if target_vocabulary.EOS_TOKEN in hypothesis:
+            eos_position = list.index(hypothesis, target_vocabulary.EOS_TOKEN)
+            hypothesis = hypothesis[1:eos_position]
+
+        predictions.append(TransducerPrediction(prediction=hypothesis, alignment=None))
+
+    return predictions
+
+
+def soft_attention_beam_search_sampling(model: TransducerModel, source_vocabulary: SourceVocabulary,
+                                        target_vocabulary: TransducerVocabulary, sequences: List[List[str]],
+                                        feature_vocabulary: Optional[SourceVocabulary] = None,
+                                        features: Optional[List[List[str]]] = None, num_beams: int = 5,
+                                        max_decoding_length: int = 70) -> List[TransducerPrediction]:
+    model = model.eval()
+    model = model.to(model.device)
+
+    # Index sources
+    sequences = [
+        [source_vocabulary.SOS_TOKEN] + source + [source_vocabulary.EOS_TOKEN] for source in sequences
+    ]
+    source_lengths = torch.tensor([len(source) for source in sequences]).long()
+    sources = [torch.tensor(source_vocabulary.index_sequence(source)).long() for source in sequences]
+    sources = pad_sequence(sources, padding_value=0, batch_first=True)
+
+    # Index features
+    if model.use_features:
+        features = [
+            [feature_vocabulary.SOS_TOKEN] + feats + [feature_vocabulary.EOS_TOKEN] for feats in features
+        ]
+        feature_lengths = torch.tensor([len(feats) for feats in features]).long()
+        features = [torch.tensor(feature_vocabulary.index_sequence(feats)).long() for feats in features]
+    else:
+        features = [None for _ in sequences]
+        feature_lengths = [None for _ in sequences]
+
+    # Run encoder
+    with torch.no_grad():
+        source_encodings = model.encode(sources, source_lengths)
+
+    soft_attention_beam = namedtuple(
+        "Beam", field_names=[
+            "batch_elem_idx", "source_encoding", "source_length", "decoder_hidden", "next_input", "hypothesis",
+            "features", "feature_length", "nll_score"
+        ]
+    )
+
+    def collate_beams(beams: List[soft_attention_beam]) -> soft_attention_beam:
+        batch_elem_ids = [beam.batch_elem_idx for beam in beams]
+        hypotheses = [beam.hypothesis for beam in beams]
+        nll_scores = [beam.nll_score for beam in beams]
+
+        # Source encodings & decoder inputs
+        beams_source_encoding = pad_sequence(
+            [beam.source_encoding[:beam.source_length] for beam in beams], padding_value=0., batch_first=True
+        )
+        beams_source_lengths = torch.tensor([beam.source_length for beam in beams]).long()
+        beams_next_input = torch.tensor([[beam.next_input] for beam in beams]).long()
+
+        # Decoder hidden states
+        if all([beam.decoder_hidden is None for beam in beams]):
+            beams_hidden = None
+        elif all([isinstance(beam.decoder_hidden, tuple) for beam in beams]):
+            beams_h0, beams_c0 = zip(*[beam.decoder_hidden for beam in beams])
+            beams_h0, beams_c0 = torch.stack(beams_h0), torch.stack(beams_c0)
+            beams_h0 = beams_h0.transpose(0, 1)
+            beams_c0 = beams_c0.transpose(0, 1)
+            beams_hidden = (beams_h0, beams_c0)
+        else:
+            found_hidden_types = set([type(beam.decoder_hidden) for beam in beams])
+            raise ValueError(f"Inconsistent decoder hidden state types, found {found_hidden_types}")
+
+        # Features & Feature lengths
+        if all([beam.features is None for beam in beams]):
+            beams_features = None
+            beams_feature_lengths = None
+        elif all([isinstance(beam.features, torch.Tensor) for beam in beams]):
+            beams_features = pad_sequence([beam.features for beam in beams], padding_value=0, batch_first=True)
+            beams_feature_lengths = torch.tensor([beam.feature_length for beam in beams])
+        else:
+            found_feature_types = set([type(beam.features) for beam in beams])
+            raise ValueError(f"Inconsistent feature types, found {found_feature_types}")
+
+        return soft_attention_beam(
+            batch_elem_idx=batch_elem_ids, source_encoding=beams_source_encoding, source_length=beams_source_lengths,
+            decoder_hidden=beams_hidden, next_input=beams_next_input, hypothesis=hypotheses, features=beams_features,
+            feature_length=beams_feature_lengths, nll_score=nll_scores
+        )
+
+    current_beams = []
+    for batch_elem_idx in range(len(sequences)):
+        current_beams.append(
+            soft_attention_beam(
+                batch_elem_idx=batch_elem_idx,
+                source_encoding=source_encodings[batch_elem_idx, :source_lengths[batch_elem_idx].item(), :],
+                source_length=source_lengths[batch_elem_idx].cpu().item(),
+                decoder_hidden=None, next_input=target_vocabulary.get_symbol_index(target_vocabulary.SOS_TOKEN),
+                hypothesis=[target_vocabulary.SOS_TOKEN], features=features[batch_elem_idx],
+                feature_length=feature_lengths[batch_elem_idx], nll_score=0.0
+            )
+        )
+
+    best_hypothesis = {batch_elem_idx: {
+        'score': -torch.inf, 'hypothesis': None} for batch_elem_idx in range(len(sequences))
+    }
+
+    for _ in range(max_decoding_length):
+        if not current_beams:
+            break
+
+        beams_batch = collate_beams(current_beams)
+
+        # Get next predicted tokens
+        with torch.no_grad():
+            target_encodings, (_, new_hidden) = model.decode(
+                beams_batch.next_input,
+                torch.ones(len(current_beams)).long(),
+                beams_batch.source_encoding,
+                beams_batch.source_length,
+                hidden=beams_batch.decoder_hidden
+            )
+
+            scores = model.get_transduction_scores(
+                target_encodings, features=beams_batch.features, feature_lengths=beams_batch.feature_length
+            )
+            scores = scores.squeeze(1).detach().cpu()
+            scores = torch.log_softmax(scores, dim=-1)
+
+        beams_by_batch_elem = defaultdict(list)
+        for current_beam_idx, current_beam in enumerate(current_beams):
+            sorted_prediction_idx = torch.argsort(scores[current_beam_idx]).flatten().tolist()
+            sorted_prediction_idx = list(reversed(sorted_prediction_idx))
+
+            for predicted_idx in sorted_prediction_idx[:num_beams]:
+                score = scores[current_beam_idx, predicted_idx].item()
+                predicted_symbol = target_vocabulary.idx2symbol[predicted_idx]
+
+                new_beam = soft_attention_beam(
+                    batch_elem_idx=current_beam.batch_elem_idx,
+                    source_encoding=current_beam.source_encoding,
+                    source_length=current_beam.source_length,
+                    decoder_hidden=(new_hidden[0][:, current_beam_idx, :], new_hidden[1][:, current_beam_idx, :]),
+                    next_input=predicted_idx,
+                    hypothesis=current_beam.hypothesis + [predicted_symbol],
+                    features=current_beam.features,
+                    feature_length=current_beam.feature_length,
+                    nll_score=current_beam.nll_score + score
+                )
+
+                if predicted_symbol == target_vocabulary.EOS_TOKEN or len(new_beam.hypothesis) > max_decoding_length:
+                    if new_beam.nll_score > best_hypothesis[new_beam.batch_elem_idx]["score"]:
+                        best_hypothesis[new_beam.batch_elem_idx] = {
+                            'score': new_beam.nll_score,
+                            'hypothesis': new_beam.hypothesis
+                        }
+
+                elif best_hypothesis[new_beam.batch_elem_idx]["score"] > new_beam.nll_score:
+                    continue
+
+                else:
+                    beams_by_batch_elem[new_beam.batch_elem_idx].append(new_beam)
+
+        new_beams = []
+        for batch_elem_beams in beams_by_batch_elem.values():
+            batch_elem_beams = list(sorted(batch_elem_beams, key=lambda bm: bm.nll_score, reverse=True))
+            new_beams.extend(batch_elem_beams[:num_beams])
+
+        current_beams = new_beams
+
+    predictions = []
+    for sequence_idx in range(len(sequences)):
+        hypothesis = best_hypothesis[sequence_idx]["hypothesis"][1:-1]
+        predictions.append(TransducerPrediction(prediction=hypothesis, alignment=None))
+
+    return predictions
+
+
+def autoregressive_greedy_sampling(model: TransducerModel, source_vocabulary: SourceVocabulary,
                                    target_vocabulary: TransducerVocabulary, sequences: List[List[str]],
                                    feature_vocabulary: Optional[SourceVocabulary] = None,
                                    features: Optional[List[List[str]]] = None,

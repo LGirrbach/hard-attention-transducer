@@ -1,2 +1,4 @@
+from models.softattention import SoftAttentionModel
 from models.autoregressive import LSTMEncoderDecoderModel
 from models.nonautoregressive import NonAutoregressiveLSTM
+
