@@ -58,7 +58,6 @@ def non_autoregressive_inference(model: TransducerModel, source_vocabulary: Sour
             tau=tau
         )
         scores = scores.reshape(len(sequences), -1, len(target_vocabulary))
-        scores = scores[:, :max_decoding_length, :]
         predictions = scores.argmax(dim=-1).detach().cpu()
 
     # Decode predictions

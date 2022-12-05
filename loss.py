@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 from torch import Tensor
 from typing import Optional
@@ -32,6 +33,145 @@ def soft_attention_loss(scores: Tensor, target_labels: Tensor, reduction: str = 
         return nll.sum() / (target_labels != 0).sum().float().clamp(1.0)
     else:
         return _loss_reduction(loss=nll, reduction=reduction)
+
+
+def fast_autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, target_lengths: Tensor,
+                                          insertion_labels: Tensor, substitution_labels: Tensor, copy_index: int,
+                                          copy_shift_index: int, deletion_index: int, copy_matrix: Tensor,
+                                          device: torch.device, allow_copy: bool = True, enforce_copy: bool = False,
+                                          reduction: str = "mean") -> Tensor:
+    assert not (enforce_copy and not allow_copy), "Cannot both enforce copy and disable copying"
+    # scores: batch x source length x target length x #labels
+
+    # Define constants
+    batch_size, source_length, target_length, num_labels = scores.shape
+    neg_inf_value = -1e6
+    neg_inf_batch_vector = torch.full((batch_size, 1), fill_value=neg_inf_value, device=device)
+    expanded_neg_inf_batch_vector_1 = neg_inf_batch_vector.transpose(0, 1).unsqueeze(2).repeat(1, 1, target_length-1)
+    expanded_neg_inf_batch_vector_2 = neg_inf_batch_vector.unsqueeze(0).repeat(target_length-1, 1, 1)
+
+    probability_matrix = [
+        torch.full(size=(batch_size, target_length), fill_value=neg_inf_value, device=device)
+        for _ in range(source_length + 1)
+    ]
+
+    batch_indices = torch.arange(0, batch_size)
+    copy_matrix = copy_matrix.to(device)
+
+    # Make lower triangular mask
+    triangular_mask = torch.ones(batch_size, target_length - 1, target_length - 1, device=device)
+    triangular_mask = torch.logical_not(torch.triu(triangular_mask).bool())
+
+    # Make substitution and insertion labels
+    substitution_labels = substitution_labels[:, 1:].unsqueeze(2).to(device)
+    insertion_labels = insertion_labels[:, 1:].unsqueeze(2).to(device)
+
+    for source_index in range(0, source_length + 1):
+        probabilities = []
+
+        # Calculate deletion scores
+        if source_index > 0:
+            deletion_scores = probability_matrix[source_index - 1]
+            deletion_scores = deletion_scores + scores[:, source_index - 1, :, deletion_index]
+            probabilities.append(deletion_scores)
+
+        # Calculate substitution scores
+        if source_index > 0:
+            substitution_prediction_scores = scores[:, source_index - 1]
+            substitution_prediction_scores = torch.gather(
+                substitution_prediction_scores[:, :-1], index=substitution_labels, dim=2
+            )
+            substitution_prediction_scores = substitution_prediction_scores.squeeze(2)
+
+            substitution_scores = probability_matrix[source_index - 1][:, :-1]
+            substitution_scores = substitution_scores + substitution_prediction_scores
+            substitution_scores = torch.cat([neg_inf_batch_vector, substitution_scores], dim=1)
+
+            if enforce_copy:
+                can_copy_mask = copy_matrix[:, source_index - 1, :]
+                substitution_scores = torch.masked_fill(
+                    substitution_scores, mask=can_copy_mask, value=neg_inf_value
+                )
+
+            probabilities.append(substitution_scores)
+
+        # Calculate copy shift scores
+        if allow_copy and source_index > 0:
+            copy_shift_prediction_scores = scores[:, source_index-1, :-1, copy_shift_index]
+            copy_shift_scores = probability_matrix[source_index - 1][:, :-1]
+            copy_shift_scores = copy_shift_scores + copy_shift_prediction_scores
+            copy_shift_scores = torch.cat([neg_inf_batch_vector, copy_shift_scores], dim=1)
+
+            copy_mask = torch.logical_not(copy_matrix[:, source_index - 1, :])
+            copy_scores = torch.masked_fill(copy_shift_scores, mask=copy_mask, value=neg_inf_value)
+
+            probabilities.append(copy_scores)
+
+        # Combine probabilities
+        if source_index > 0:
+            probabilities = torch.stack(probabilities)
+        else:
+            probabilities = torch.cat(
+                [torch.zeros([1, batch_size, 1], device=device), expanded_neg_inf_batch_vector_1], dim=2
+            )
+
+        # Calculate insertion scores
+        if source_index < source_length:
+            # Expand the row internal recursion (insert ops, from left to right)
+            # 1. Get scores for insert op
+            insertion_prediction_scores = scores[:, source_index, :-1, :]
+            insertion_prediction_scores = torch.gather(
+                insertion_prediction_scores, index=insertion_labels, dim=2
+            )
+
+            # 2. Build matrix that describes the weights partial probabilities in the row
+            #    are multiplied with when added to later partial probabilities
+            #    We expand the recursion, so we have to calculate cumulative sums (in log space)
+            #    and zero out invalid terms
+            #
+            # 2.1. Copy scores across all timesteps
+            insertion_prediction_scores = insertion_prediction_scores.repeat(1, 1, target_length-1)
+            # 2.2. Zero out invalid terms (that do not appear in the expanded recursion)
+            insertion_prediction_scores = torch.flip(insertion_prediction_scores, dims=(1,))
+            insertion_prediction_scores = torch.masked_fill(
+                insertion_prediction_scores, mask=triangular_mask.flip(dims=(1,)), value=0.
+            )
+            # 2.3. Sum log-probs for each combination of timesteps
+            insertion_prediction_scores = torch.cumsum(insertion_prediction_scores, dim=1)
+            insertion_prediction_scores = torch.flip(insertion_prediction_scores, dims=(1,))
+            # 2.4. Second masking: This time for real, not only to ensure correct behaviour of cumsum
+            insertion_prediction_scores = torch.masked_fill(
+                insertion_prediction_scores, mask=triangular_mask, value=neg_inf_value
+            )
+
+            # 2.5. Calculate expanded recursion
+            if probabilities.shape[0] > 1:
+                partial_probabilities = torch.logsumexp(probabilities, dim=0)
+            else:
+                partial_probabilities = probabilities.squeeze(0)
+
+            partial_probabilities = partial_probabilities[:, :-1]
+            partial_probabilities = partial_probabilities.unsqueeze(2)
+            partial_probabilities = partial_probabilities.repeat(1, 1, target_length-1)
+
+            insertion_scores = insertion_prediction_scores + partial_probabilities
+            insertion_scores = insertion_scores.permute([1, 0, 2])
+
+            # 2.6. We don't calculate the true insertion scores but just add them in the logsumexp
+            #      of all scores in order to avoid chained logsumexp
+            insertion_scores = torch.cat([expanded_neg_inf_batch_vector_2, insertion_scores], dim=2)
+            probabilities = torch.cat([probabilities, insertion_scores], dim=0)
+
+        probabilities = torch.logsumexp(probabilities, dim=0)
+        probability_matrix[source_index] = probabilities
+
+    probability_matrix = torch.stack(probability_matrix)
+    probability_matrix = torch.permute(probability_matrix, dims=(1, 0, 2))
+
+    nll = -probability_matrix[batch_indices, source_lengths, :][batch_indices, target_lengths - 1]
+    loss = _loss_reduction(nll, reduction=reduction)
+
+    return loss
 
 
 def autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, target_lengths: Tensor,

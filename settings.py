@@ -18,6 +18,8 @@ setting_fields = [
     "main_metric",  # Development metric used for evaluating training progress (training loss if no dev data)
     "keep_only_best_checkpoint",  # Whether to only save the best checkpoint (according to loss / dev score)
     "use_features",  # Whether to use additional features (e.g. for inflection)
+    "min_source_frequency",  # Mask source symbols by UNK token that appear less than given frequency
+    "min_target_frequency",  # Mask target symbols by UNK token that appear less than given frequency
 
     # Optimizer Settings
     "optimizer",  # Name of optimizer
@@ -43,7 +45,9 @@ setting_fields = [
     # Loss Settings
     "noop_discount",  # Discount factor for loss incurred by blank actions (only for non-autoregressive model)
     "allow_copy",  # Whether copying is a valid action
-    "enforce_copy",  # Always copy when possible (instead of substitution)
+    "enforce_copy",  # Always copy when possible (instead of substitution),
+    "fast_autoregressive",  # Use fast autoregressive loss. In this case, copying the same symbol multiple times is not
+                            # possible
 
     # Experiment Settings
     "name",  # Name of experiment
@@ -90,6 +94,14 @@ def make_argument_parser():
         help="Whether to only save the best checkpoint (according to loss / dev score)"
     )
     parser.add_argument("--use-features", action="store_true", help="Whether to use additional features")
+    parser.add_argument(
+        "--min-source-frequency", type=int, default=1,
+        help="Mask source symbols by UNK token that appear less than given frequency"
+    )
+    parser.add_argument(
+        "--min-target-frequency", type=int, default=1,
+        help="Mask target symbols by UNK token that appear less than given frequency"
+    )
 
     # Optimizer Settings
     parser.add_argument("--optimizer", type=str, default="adamw", choices=["adam", "adamw", "sgd"], help="Optimizer")
@@ -137,6 +149,10 @@ def make_argument_parser():
     )
     parser.add_argument("--disable-copy", action="store_true", help="Disables copy action")
     parser.add_argument("--enforce-copy", action="store_true", help="Always copy if possible")
+    parser.add_argument(
+        "--fast-autoregressive", action="store_true",
+        help="Use fast autoregressive loss. In this case, copying the same symbol multiple times is not possible."
+    )
 
     # Experiment Settings
     parser.add_argument("--name", type=str, default="trial_model", help="Experiment Name")
@@ -184,7 +200,9 @@ def get_settings_from_arguments() -> Settings:
         noop_discount=args.noop_discount, allow_copy=allow_copy, enforce_copy=args.enforce_copy, name=args.name,
         train_data_path=args.train_data, dev_data_path=args.dev_data, save_path=args.save_path,
         beam_search=args.beam_search, num_beams=args.beams, max_decoding_length=args.max_decoding_length,
-        encoder_bridge=args.encoder_bridge, evaluate_every=args.evaluate_every
+        encoder_bridge=args.encoder_bridge, evaluate_every=args.evaluate_every,
+        min_source_frequency=args.min_source_frequency, min_target_frequency=args.min_target_frequency,
+        fast_autoregressive=args.fast_autregressive
     )
 
     return settings
@@ -201,7 +219,8 @@ def make_settings(
         temperature: float = 1.0, features_num_layers: int = 0, features_pooling: str = "mean",
         noop_discount: float = 1.0, allow_copy: bool = True, enforce_copy: bool = False,
         train_data_path: Optional[str] = None, dev_data_path: Optional[str] = None, beam_search: bool = True,
-        num_beams: int = 5, max_decoding_length: int = 100, encoder_bridge: bool = False) -> Settings:
+        num_beams: int = 5, max_decoding_length: int = 100, encoder_bridge: bool = False,
+        min_source_frequency: int = 1, min_target_frequency: int = 1, fast_autoregressive: bool = False) -> Settings:
     return Settings(
         epochs=epochs, batch=batch, device=device, scheduler=scheduler, gamma=gamma,
         verbose=verbose, report_progress_every=report_progress_every, main_metric=main_metric,
@@ -213,5 +232,6 @@ def make_settings(
         features_pooling=features_pooling, noop_discount=noop_discount, allow_copy=allow_copy,
         enforce_copy=enforce_copy, name=name, train_data_path=train_data_path, dev_data_path=dev_data_path,
         save_path=save_path, beam_search=beam_search, num_beams=num_beams, max_decoding_length=max_decoding_length,
-        encoder_bridge=encoder_bridge, evaluate_every=evaluate_every
+        encoder_bridge=encoder_bridge, evaluate_every=evaluate_every, fast_autoregressive=fast_autoregressive,
+        min_source_frequency=min_source_frequency, min_target_frequency=min_target_frequency
     )

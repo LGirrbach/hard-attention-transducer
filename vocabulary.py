@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List
+from collections import Counter
 from actions import Copy, CopyShift, Deletion, Substitution, Insertion, Action, Noop
 
 COPY = Copy()
@@ -16,9 +17,9 @@ class SourceVocabulary:
     SOS_TOKEN = "<SOS>"
     EOS_TOKEN = "<EOS>"
 
-    def __init__(self, tokens: List[str]):
+    def __init__(self, symbols: List[str]):
         self.specials = self.get_specials()
-        self.tokens = self.specials + list(sorted(set(tokens)))
+        self.tokens = self.specials + list(sorted(set(symbols)))
 
         self.token2idx = {token: idx for idx, token in enumerate(self.tokens)}
         self.idx2token = {idx: token for idx, token in enumerate(self.tokens)}
@@ -44,9 +45,14 @@ class SourceVocabulary:
         return [self.idx2token.get(index, self.UNK_TOKEN) for index in idx]
 
     @classmethod
-    def build_vocabulary(cls, sequences: List[List[str]]) -> SourceVocabulary:
-        all_tokens = list(set.union(*(set(sequence) for sequence in sequences)))
-        return cls(tokens=all_tokens)
+    def build_vocabulary(cls, sequences: List[List[str]], min_frequency: int = 1) -> SourceVocabulary:
+        all_symbols = []
+        for sequence in sequences:
+            all_symbols.extend(sequence)
+
+        symbol_counts = Counter(all_symbols)
+        filtered_symbols = list(sorted([symbol for symbol, count in symbol_counts.items() if count >= min_frequency]))
+        return cls(symbols=filtered_symbols)
 
 
 class TransducerVocabulary:
@@ -107,9 +113,14 @@ class TransducerVocabulary:
         return [self.get_symbol_index(symbol) for symbol in symbols]
 
     @classmethod
-    def build_vocabulary(cls, sequences: List[List[str]]) -> TransducerVocabulary:
-        all_tokens = list(set.union(*(set(sequence) for sequence in sequences)))
-        return cls(symbols=all_tokens)
+    def build_vocabulary(cls, sequences: List[List[str]], min_frequency: int = 1) -> TransducerVocabulary:
+        all_symbols = []
+        for sequence in sequences:
+            all_symbols.extend(sequence)
+
+        symbol_counts = Counter(all_symbols)
+        filtered_symbols = list(sorted([symbol for symbol, count in symbol_counts.items() if count >= min_frequency]))
+        return cls(symbols=filtered_symbols)
 
 
 class Seq2SeqVocabulary:

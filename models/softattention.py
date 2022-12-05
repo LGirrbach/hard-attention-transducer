@@ -10,6 +10,7 @@ from models.base import TransducerModel
 from models.encoder import BiLSTMEncoder
 from models.decoder import DecoderOutput
 from models.attention import MLPAttention
+from models.attention import DotProductAttention
 from models.feature_encoder import FeatureEncoder
 
 
@@ -18,7 +19,7 @@ class SoftAttentionModel(TransducerModel):
                  hidden_size: int = 128, num_layers: int = 2, dropout: float = 0.0, temperature: float = 1.0,
                  scorer: str = "softmax", device: torch.device = torch.device("cpu"), use_features: bool = False,
                  feature_vocab_size: int = 0, feature_encoder_hidden: int = 128, feature_encoder_layers: int = 0,
-                 feature_encoder_pooling: str = "mean", encoder_bridge: bool = False):
+                 feature_encoder_pooling: str = "mean", encoder_bridge: bool = False, attention_type: str = "mlp"):
         super(SoftAttentionModel, self).__init__()
 
         self.source_vocab_size = source_vocab_size
@@ -36,6 +37,7 @@ class SoftAttentionModel(TransducerModel):
         self.feature_encoder_layers = feature_encoder_layers
         self.feature_encoder_pooling = feature_encoder_pooling
         self.encoder_bridge = encoder_bridge
+        self.attention_type = attention_type
 
         # Make Embedders
         self.encoder_embedder = Embedder(vocab_size=source_vocab_size, embedding_dim=embedding_dim, dropout=dropout)
@@ -71,9 +73,14 @@ class SoftAttentionModel(TransducerModel):
             prediction_head_input_size = 2 * self.hidden_size
 
         # Make soft attention mechanism
-        self.attention = MLPAttention(
-            query_size=hidden_size, key_size=hidden_size, hidden_size=hidden_size, dropout=dropout
-        )
+        if self.attention_type == "dot":
+            self.attention = DotProductAttention()
+        elif self.attention_type == "mlp":
+            self.attention = MLPAttention(
+                query_size=hidden_size, key_size=hidden_size, hidden_size=hidden_size, dropout=dropout
+            )
+        else:
+            raise ValueError(f"Unknown attention type: {self.attention_type}")
 
         self.classifier = nn.Sequential(
             nn.Dropout(p=self.dropout),
@@ -102,6 +109,7 @@ class SoftAttentionModel(TransducerModel):
             'feature_encoder_layers': self.feature_encoder_layers,
             'feature_encoder_pooling': self.feature_encoder_pooling,
             'encoder_bridge': self.encoder_bridge,
+            'attention_type': self.attention_type
         }
 
     def encode(self, encoder_inputs: Tensor, lengths: Tensor) -> Tuple[Tensor, Tensor]:

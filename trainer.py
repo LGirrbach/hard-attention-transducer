@@ -28,12 +28,14 @@ from torch.optim.lr_scheduler import OneCycleLR
 from torch.optim.lr_scheduler import ExponentialLR
 from loss import autoregressive_transduction_loss
 from inference import non_autoregressive_inference
-from inference import soft_attention_greedy_sampling, soft_attention_beam_search_sampling
+from inference import soft_attention_greedy_sampling
 from inference import autoregressive_greedy_sampling
 from loss import non_autoregressive_transduction_loss
 from dataset import AutoregressiveTransducerDatasetTrain
 from dataset import NonAutoregressiveTransducerDatasetTrain
 from vocabulary import SourceVocabulary, TransducerVocabulary
+
+from loss import fast_autoregressive_transduction_loss
 
 
 Sequence = List[str]
@@ -46,11 +48,15 @@ TrainedModel = namedtuple(
 )
 
 
-def _prepare_datasets(train_data: RawDataset, development_data: Optional[RawDataset], autoregressive: bool = True,
-                      use_features: bool = False):
+def _prepare_datasets(settings: Settings, train_data: RawDataset, development_data: Optional[RawDataset],
+                      autoregressive: bool = True, use_features: bool = False):
     # Build vocabularies
-    source_vocabulary = SourceVocabulary.build_vocabulary(train_data.sources)
-    target_vocabulary = TransducerVocabulary.build_vocabulary(train_data.targets)
+    source_vocabulary = SourceVocabulary.build_vocabulary(
+        train_data.sources, min_frequency=settings.min_source_frequency
+    )
+    target_vocabulary = TransducerVocabulary.build_vocabulary(
+        train_data.targets, min_frequency=settings.min_target_frequency
+    )
 
     if use_features:
         feature_vocabulary = SourceVocabulary.build_vocabulary(train_data.features)
@@ -195,7 +201,8 @@ def load_model(path: str) -> TrainedModel:
 
 
 def evaluate_on_development_set(model_name: str, model: TrainedModel, development_data: TransducerDatasetTrain,
-                                batch_size: int, device: torch.device, max_decoding_length: int):
+                                batch_size: int, fast_autoregressive_loss: bool, device: torch.device,
+                                max_decoding_length: int):
     assert development_data is not None
 
     source_vocabulary = model.source_vocabulary
@@ -229,7 +236,8 @@ def evaluate_on_development_set(model_name: str, model: TrainedModel, developmen
 
             if model_name == "autoregressive":
                 batch_losses = _get_autoregressive_loss(
-                    model=model, batch=batch, device=device, allow_copy=True, enforce_copy=False, reduction='none'
+                    model=model, batch=batch, device=device, allow_copy=True, enforce_copy=False, reduction='none',
+                    fast=fast_autoregressive_loss
                 )
                 batch_predictions = autoregressive_greedy_sampling(
                     model=model, source_vocabulary=source_vocabulary, target_vocabulary=target_vocabulary,
@@ -290,7 +298,7 @@ def evaluate_on_development_set(model_name: str, model: TrainedModel, developmen
 
 
 def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch.device, allow_copy: bool,
-                             enforce_copy: bool, reduction: str) -> Tensor:
+                             enforce_copy: bool, reduction: str, fast: bool) -> Tensor:
     source_encodings = model.encode(batch.sources, batch.source_lengths)
     target_encodings, _ = model.decode(batch.targets, batch.target_lengths, source_encodings, batch.source_lengths)
 
@@ -301,7 +309,12 @@ def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch
     else:
         scores = model.get_transduction_scores(source_encodings, target_encodings)
 
-    loss = autoregressive_transduction_loss(
+    if fast:
+        loss_func = fast_autoregressive_transduction_loss
+    else:
+        loss_func = autoregressive_transduction_loss
+
+    loss = loss_func(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
         copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index, deletion_index=batch.deletion_index,
@@ -336,6 +349,9 @@ def _get_non_autoregressive_loss(model: nn.Module, batch: Batch, device: torch.d
     if tau is None:
         tau = batch.target_lengths.max().detach().cpu().item()
 
+    if tau > model.max_targets_per_symbol:
+        tau = model.max_targets_per_symbol
+
     if model.use_features:
         scores = model(
             sources=batch.sources, lengths=batch.source_lengths, features=batch.features,
@@ -367,8 +383,8 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
     is_autoregressive = not is_non_autoregressive
 
     source_vocabulary, target_vocabulary, feature_vocabulary, train_dataset, dev_dataset = _prepare_datasets(
-        train_data=train_data, development_data=development_data, autoregressive=is_autoregressive,
-        use_features=settings.use_features
+        settings=settings, train_data=train_data, development_data=development_data,
+        autoregressive=is_autoregressive, use_features=settings.use_features
     )
     max_development_decoding_length = max([len(datapoint.target) for datapoint in train_dataset]) + 10
 
@@ -438,7 +454,7 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
             if settings.model == "autoregressive":
                 loss = _get_autoregressive_loss(
                     model=model, batch=batch, allow_copy=settings.allow_copy, enforce_copy=settings.enforce_copy,
-                    device=settings.device, reduction='mean'
+                    device=settings.device, reduction='mean', fast=settings.fast_autoregressive
                 )
 
             elif settings.model == "non-autoregressive":
@@ -489,6 +505,7 @@ def train(train_data: RawDataset, development_data: Optional[RawDataset], settin
             development_metrics = evaluate_on_development_set(
                 model_name=settings.model, model=epoch_model, development_data=dev_dataset,
                 batch_size=settings.batch, device=settings.device, max_decoding_length=max_development_decoding_length,
+                fast_autoregressive_loss=settings.fast_autoregressive
             )
 
             if settings.verbose:

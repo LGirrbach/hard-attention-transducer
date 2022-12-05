@@ -78,9 +78,6 @@ class NonAutoregressivePositionalDecoder(nn.Module):
         )
 
     def forward(self, encoder_outputs: Tensor, tau: int) -> Tensor:
-        if tau > self.max_decoding_length:
-            raise ValueError(f"Given tau ({tau}) is greater than max. decoding length ({self.max_decoding_length})")
-
         # Make input sequence
         batch, timesteps, num_features = encoder_outputs.shape
 
@@ -174,14 +171,14 @@ class NonAutoregressiveLSTM(TransducerModel):
 
         # Make symbol decoder
         if decoder_type == "lstm":
-            assert tau is None
+            # assert tau is None
             self.decoder = NonAutoregressiveLSTMDecoder(
                 input_size=classifier_input_dim, hidden_size=hidden_size, dropout=dropout, num_layers=num_layers,
                 target_vocab_size=target_vocab_size, device=device
             )
 
         elif decoder_type == "position":
-            assert tau is None
+            # assert tau is None
             self.decoder = NonAutoregressivePositionalDecoder(
                 embedding_size=embedding_dim, max_decoding_length=max_targets_per_symbol,
                 input_size=classifier_input_dim, hidden_size=hidden_size, dropout=dropout, device=device,
