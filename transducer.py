@@ -9,6 +9,7 @@ from dataset import RawDataset
 from trainer import load_model
 from trainer import TrainedModel
 from align import autoregressive_align
+from align import non_autoregressive_align
 from inference import TransducerPrediction
 from inference import non_autoregressive_inference
 from inference import soft_attention_greedy_sampling
@@ -127,4 +128,8 @@ class Transducer:
                 feature_vocabulary=self.model.feature_vocabulary, features=features
             )
         elif self.settings.model == "non-autoregressive":
-            raise NotImplementedError()
+            return non_autoregressive_align(
+                settings=self.settings, model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+                target_vocabulary=self.model.target_vocabulary, sources=sources, targets=targets,
+                feature_vocabulary=self.model.feature_vocabulary, features=features
+            )

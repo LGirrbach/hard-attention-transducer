@@ -342,8 +342,7 @@ def _get_soft_attention_loss(model: TransducerModel, batch: Batch, reduction: st
     return loss
 
 
-def _get_non_autoregressive_loss(model: nn.Module, batch: Batch, device: torch.device, allow_copy: bool,
-                                 enforce_copy: bool, noop_discount: float, reduction: str) -> Tensor:
+def _non_autoregressive_get_scores(model: TransducerModel, batch: Batch) -> Tuple[Tensor, int]:
     tau = model.tau
     if tau is None:
         tau = batch.target_lengths.max().detach().cpu().item()
@@ -361,13 +360,20 @@ def _get_non_autoregressive_loss(model: nn.Module, batch: Batch, device: torch.d
             sources=batch.sources, lengths=batch.source_lengths, features=None, feature_lengths=None, tau=tau
         )
 
+    return scores, tau
+
+
+def _get_non_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch.device, allow_copy: bool,
+                                 enforce_copy: bool, noop_discount: float, reduction: str) -> Tensor:
+    scores, tau = _non_autoregressive_get_scores(model=model, batch=batch)
+
     loss = non_autoregressive_transduction_loss(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
         copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index,
         deletion_index=batch.deletion_index, noop_index=batch.noop_index,
         copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy, tau=tau,
-        noop_discount=noop_discount, reduction=reduction
+        noop_discount=noop_discount, reduction=reduction, return_backpointers=False
     )
 
     return loss
