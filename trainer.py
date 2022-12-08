@@ -297,24 +297,23 @@ def evaluate_on_development_set(model_name: str, model: TrainedModel, developmen
     }
 
 
+def _autoregressive_get_scores(model: TransducerModel, batch: Batch) -> Tensor:
+    source_encodings = model.encode(batch.sources, batch.source_lengths)
+    target_encodings, _ = model.decode(
+        batch.targets, batch.target_lengths, source_encodings, batch.source_lengths
+    )
+
+    return model.get_transduction_scores(
+        source_encodings, target_encodings, batch.features, batch.feature_lengths
+    )
+
+
 def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch.device, allow_copy: bool,
                              enforce_copy: bool, reduction: str, fast: bool) -> Tensor:
-    source_encodings = model.encode(batch.sources, batch.source_lengths)
-    target_encodings, _ = model.decode(batch.targets, batch.target_lengths, source_encodings, batch.source_lengths)
+    scores = _autoregressive_get_scores(model=model, batch=batch)
+    criterion = fast_autoregressive_transduction_loss if fast else autoregressive_transduction_loss
 
-    if model.use_features:
-        scores = model.get_transduction_scores(
-            source_encodings, target_encodings, batch.features, batch.feature_lengths
-        )
-    else:
-        scores = model.get_transduction_scores(source_encodings, target_encodings)
-
-    if fast:
-        loss_func = fast_autoregressive_transduction_loss
-    else:
-        loss_func = autoregressive_transduction_loss
-
-    loss = loss_func(
+    loss = criterion(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
         copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index, deletion_index=batch.deletion_index,

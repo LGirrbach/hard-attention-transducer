@@ -72,7 +72,7 @@ class TransducerDatasetTrain(Dataset, ABC):
         raise NotImplementedError
 
     @staticmethod
-    def _make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
+    def make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
         raise NotImplementedError
 
     def collate_fn(self, batch: Iterable[RawBatchElement]) -> Batch:
@@ -120,7 +120,7 @@ class TransducerDatasetTrain(Dataset, ABC):
 
         batch_copy_matrix = []
         for source, target in zip(sources, targets):
-            copy_matrix = self._make_copy_matrix(source, target, batch_source_length, batch_target_length)
+            copy_matrix = self.make_copy_matrix(source, target, batch_source_length, batch_target_length)
             batch_copy_matrix.append(copy_matrix)
 
         batch_copy_matrix = torch.stack(batch_copy_matrix)
@@ -159,7 +159,7 @@ class AutoregressiveTransducerDatasetTrain(TransducerDatasetTrain):
         return sequence
 
     @staticmethod
-    def _make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
+    def make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
         copy_matrix = torch.zeros(batch_source_length, batch_target_length, dtype=torch.bool)
         for source_index, source_symbol in enumerate(source):
             for target_index, target_symbol in enumerate(target[1:]):
@@ -179,7 +179,7 @@ class NonAutoregressiveTransducerDatasetTrain(TransducerDatasetTrain):
         return sequence
 
     @staticmethod
-    def _make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
+    def make_copy_matrix(source: List[str], target: List[str], batch_source_length: int, batch_target_length: int):
         copy_matrix = torch.zeros(batch_source_length, batch_target_length, dtype=torch.bool)
         for source_index, source_symbol in enumerate(source):
             for target_index, target_symbol in enumerate(target):

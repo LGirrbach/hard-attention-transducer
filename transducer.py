@@ -8,6 +8,7 @@ from settings import Settings
 from dataset import RawDataset
 from trainer import load_model
 from trainer import TrainedModel
+from align import autoregressive_align
 from inference import TransducerPrediction
 from inference import non_autoregressive_inference
 from inference import soft_attention_greedy_sampling
@@ -115,3 +116,15 @@ class Transducer:
             return self._predict_non_autoregressive_batch(sources=sources, features=features)
         else:
             raise ValueError(f"Unknown model: {self.settings.model}")
+
+    def align(self, sources: Sequences, targets: Sequences, features: Optional[Sequences] = None):
+        if self.settings.model == "soft-attention":
+            raise RuntimeError("Can't use soft attention model as aligner")
+        elif self.settings.model == "autoregressive":
+            return autoregressive_align(
+                settings=self.settings, model=self.model.model, source_vocabulary=self.model.source_vocabulary,
+                target_vocabulary=self.model.target_vocabulary, sources=sources, targets=targets,
+                feature_vocabulary=self.model.feature_vocabulary, features=features
+            )
+        elif self.settings.model == "non-autoregressive":
+            raise NotImplementedError()
