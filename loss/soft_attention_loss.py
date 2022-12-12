@@ -1,6 +1,7 @@
 import torch
 
 from torch import Tensor
+from loss.loss_utils import shoot_nans
 from loss.loss_utils import _loss_reduction
 
 # Global variables
@@ -17,6 +18,7 @@ def soft_attention_loss(scores: Tensor, target_labels: Tensor, reduction: str = 
     target_labels = target_labels.to(scores.device)
 
     nll = cross_entropy(scores, target_labels)
+    nll = shoot_nans(nll)
 
     if reduction == "mean":
         return nll.sum() / (target_labels != 0).sum().float().clamp(1.0)

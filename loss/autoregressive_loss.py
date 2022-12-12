@@ -3,6 +3,7 @@ import torch
 from typing import List
 from torch import Tensor
 from util import make_mask_3d
+from loss.loss_utils import shoot_nans
 from loss.loss_utils import neg_inf_value
 from loss.loss_utils import _loss_reduction
 from actions import Deletion, Copy, CopyShift, Insertion, Substitution
@@ -156,6 +157,7 @@ def fast_autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor
     probability_matrix = probability_matrix.transpose(0, 1)
 
     nll = -probability_matrix[batch_indices, source_lengths, target_lengths - 1]
+    nll = shoot_nans(nll)
     loss = _loss_reduction(nll, reduction=reduction)
 
     return loss
@@ -315,6 +317,7 @@ def autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor, tar
     probability_matrix = torch.permute(probability_matrix, dims=(2, 0, 1))
 
     nll = -probability_matrix[batch_indices, source_lengths, target_lengths - 1]
+    nll = shoot_nans(nll)
     loss = _loss_reduction(nll, reduction=reduction)
 
     return loss

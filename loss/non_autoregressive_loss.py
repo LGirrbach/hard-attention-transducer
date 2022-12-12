@@ -2,6 +2,7 @@ import torch
 
 from torch import Tensor
 from typing import Optional
+from loss.loss_utils import shoot_nans
 from loss.loss_utils import _loss_reduction
 from actions import Deletion, Copy, CopyShift, Insertion, Substitution
 
@@ -246,6 +247,7 @@ def non_autoregressive_transduction_loss(scores: Tensor, source_lengths: Tensor,
     probability_matrix = torch.transpose(probability_matrix, 0, 1)
 
     nll = -probability_matrix[batch_indices, tau * source_lengths, target_lengths]
+    nll = shoot_nans(nll)
 
     if return_backpointers:
         loss = _loss_reduction(nll, reduction="none")

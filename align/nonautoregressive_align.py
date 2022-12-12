@@ -17,6 +17,7 @@ from actions import Deletion, Copy, CopyShift, Insertion, Substitution
 
 
 def decode_backpointers(tau: int, source: List[str], target: List[str], backpointers) -> List[AlignmentPosition]:
+
     def make_alignment(source_index: int):
         return {"source_symbol": source[source_index], "target_symbols": [], "actions": []}
 
@@ -67,6 +68,7 @@ def decode_backpointers(tau: int, source: List[str], target: List[str], backpoin
             current_alignment["target_symbols"].append(target[j])
             current_alignment["actions"].append(CopyShift())
 
+    aligned_positions.append(current_alignment)
     aligned_positions = [
         AlignmentPosition(
             symbol=position["source_symbol"],
