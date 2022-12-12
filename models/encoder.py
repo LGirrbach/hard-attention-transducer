@@ -27,7 +27,7 @@ class BiLSTMEncoder(nn.Module):
         # Initialise modules
         self.lstm = nn.LSTM(
             input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True,
-            bidirectional=True, dropout=dropout
+            bidirectional=True, dropout=(dropout if num_layers > 1 else 0.0)
         )
         self.reduce_dim = nn.Linear(2 * self.hidden_size, self.hidden_size)
 

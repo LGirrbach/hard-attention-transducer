@@ -22,7 +22,8 @@ class NonAutoregressiveLSTMDecoder(nn.Module):
 
         self.decoder = nn.LSTM(
             input_size=input_size, hidden_size=hidden_size, num_layers=num_layers,
-            bias=True, bidirectional=False, batch_first=True, dropout=dropout, proj_size=0
+            bias=True, bidirectional=False, batch_first=True, dropout=(dropout if num_layers > 1 else 0.0),
+            proj_size=0
         )
         self.h_0 = nn.Parameter(torch.zeros(self.num_layers, 1, self.hidden_size))
         self.c_0 = nn.Parameter(torch.zeros(self.num_layers, 1, self.hidden_size))

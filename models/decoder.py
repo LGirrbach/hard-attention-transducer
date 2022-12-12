@@ -23,7 +23,8 @@ class LSTMDecoder(nn.Module):
         self.encoder_bridge = encoder_bridge
 
         self.lstm = nn.LSTM(
-            input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True
+            input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True,
+            dropout=(dropout if num_layers > 1 else 0.0)
         )
 
         if self.encoder_bridge:
