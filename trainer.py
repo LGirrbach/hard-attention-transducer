@@ -286,14 +286,15 @@ def evaluate_on_development_set(model_name: str, model: TrainedModel, developmen
     # Calculate metrics
     loss = np.mean(losses)
     wer = 100 * (1 - np.mean([prediction == target for prediction, target in zip(predictions, targets)]))
-    edit_distance = np.mean(
-        [editdistance.distance(prediction, target) for prediction, target in zip(predictions, targets)]
-    )
+    edit_distances = [editdistance.distance(prediction, target) for prediction, target in zip(predictions, targets)]
+    edit_distance = np.mean(edit_distances)
+    normalised_edit_distance = np.mean([distance / len(target) for distance, target in zip(edit_distances, targets)])
 
     return {
         'loss': loss,
         'wer': wer,
-        'edit_distance': edit_distance
+        'edit_distance': edit_distance,
+        "normalised_edit_distance": normalised_edit_distance
     }
 
 
