@@ -314,6 +314,28 @@ def _get_autoregressive_loss(model: TransducerModel, batch: Batch, device: torch
     scores = _autoregressive_get_scores(model=model, batch=batch)
     criterion = fast_autoregressive_transduction_loss if fast else autoregressive_transduction_loss
 
+    """
+    fast_loss = fast_autoregressive_transduction_loss(
+        scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
+        insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
+        copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index, deletion_index=batch.deletion_index,
+        copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy,
+        reduction=reduction
+    )
+
+    slow_loss = autoregressive_transduction_loss(
+        scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
+        insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
+        copy_index=batch.copy_index, copy_shift_index=batch.copy_shift_index, deletion_index=batch.deletion_index,
+        copy_matrix=batch.copy_matrix, device=device, allow_copy=allow_copy, enforce_copy=enforce_copy,
+        reduction=reduction
+    )
+
+    print(fast_loss)
+    print(slow_loss)
+    raise
+    """
+
     loss = criterion(
         scores=scores, source_lengths=batch.source_lengths, target_lengths=batch.target_lengths,
         insertion_labels=batch.insertion_labels, substitution_labels=batch.substitution_labels,
